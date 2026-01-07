@@ -1,0 +1,50 @@
+{
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "resource_id": {
+        "type": "keyword"
+      },
+
+      "passage_id": {
+        "type": "keyword"
+      },
+
+      "citeType": {
+        "type": "keyword"
+      },
+
+      "level": {
+        "type": "integer"
+      },
+
+      "content": {
+        "type": "text",
+        "analyzer": "folding",
+        "term_vector": "with_positions_offsets"
+      },
+
+      "path": {
+        "type": "keyword"
+      },
+
+      "path_ids": {
+        "type": "keyword"
+      },
+
+      "ancestors": {
+        "type": "nested",
+        "properties": {
+          "id": { "type": "keyword" },
+          "level": { "type": "integer" },
+          "citeType": { "type": "keyword" }
+        }
+      },
+
+      "metadata": {
+        "type": "object",
+        "dynamic": true
+      }
+    }
+  }
+}
