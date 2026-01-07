@@ -15,31 +15,6 @@ body_tag = re.compile('<body(?:(?:.|\n)*?)>((?:.|\n)*?)</body>')
 
 app = None
 
-from lxml import etree
-
-XML_NS = {"tei": "http://www.tei-c.org/ns/1.0"}
-
-
-def extract_passage_text(element) -> str:
-    """
-    Extrait le texte d'un élément TEI pour l'indexation.
-    - Si l'élément a des descendants avec @xml:id, on exclut leur texte.
-    - Sinon on prend tout le texte.
-    """
-    # cherche descendants avec xml:id
-    descendants_with_id = element.xpath(".//*[@xml:id]", namespaces=XML_NS)
-    if descendants_with_id:
-        # texte propre à cet élément, exclut descendants identifiés
-        texts = element.xpath(
-            "text() | ./node()[not(@xml:id)]//text()",
-            namespaces=XML_NS
-        )
-    else:
-        # pas de descendants identifiés → texte complet
-        texts = element.xpath(".//text()", namespaces=XML_NS)
-
-    return " ".join(t.strip() for t in texts if t.strip())
-
 
 def remove_html_tags(text):
     return re.sub(clean_tags, ' ', text)
@@ -82,47 +57,6 @@ def normalize_extension_key(key: str) -> str:
     - replace ':' by '_'
     """
     return key.replace(":", "_")
-
-def get_ancestors(passage_id: str, nav_index: dict) -> list:
-    ancestors = []
-    current = nav_index.get(passage_id)
-
-    while current and current.get("parent"):
-        parent_id = current["parent"]
-        parent = nav_index.get(parent_id)
-        if not parent:
-            break
-        ancestors.insert(0, {
-            "id": parent["id"],
-            "level": parent.get("level"),
-            "citeType": parent.get("citeType")
-        })
-        current = parent
-
-    return ancestors
-
-def build_navigation_index(dts_url: str, resource_id: str) -> dict:
-    response = requests.get(
-        f"{dts_url}/navigation",
-        params={"resource": resource_id, "down": -1}
-    )
-    response.raise_for_status()
-    print('build_navigation_index' , dts_url, resource_id, response)
-    nav = {}
-    for item in response.json().get("member", []):
-        # utilisez 'identifier' au lieu de 'id'
-        passage_id = item.get("identifier")
-        if not passage_id:
-            continue  # ignore les items sans identifiant
-
-        nav[passage_id] = {
-            "id": passage_id,
-            "citeType": item.get("citeType"),
-            "level": item.get("level"),
-            # parent doit aussi être normalisé si nécessaire
-            "parent": item.get("parent") or item.get("parentIdentifier")
-        }
-    return nav
 
 
 def extract_resource_metadata(resource_collection_response: dict) -> dict:
@@ -175,7 +109,9 @@ def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids
 
     path = title if not parent_path else f"{parent_path} > {title}"
     path_ids = [response.get("@id")] if not parent_path_ids else parent_path_ids + [response.get("@id")]
-    print('extract_metadata id', )
+
+
+
     metadata = {
         "id": response.get("@id"),
         "type": response.get("@type"),
@@ -192,77 +128,53 @@ def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids
         "totalChildren": response.get("totalChildren"),
         "totalParents": response.get("totalParents"),
 
-        "dublinCore": response.get("dublinCore", {}),
         "members": response.get("member", [])
     }
+    # Ajout de dublinCore:
+    dublinCore = {}
+    dc = response.get("dublinCore", {})
+    if isinstance(dc, dict):
+        for key, value in dc.items():
+            if value is None:
+                continue
+
+            # transformer en string si c'est un dict ou une liste
+            if isinstance(value, dict):
+                # par exemple prendre uniquement le label/id si existant
+                value = value.get("label") or value.get("@id") or str(value)
+            elif isinstance(value, list):
+                # transformer la liste en string (ou liste de strings)
+                value = ", ".join(
+                    str(v.get("label") if isinstance(v, dict) else v) for v in value
+                )
+            elif not isinstance(value, str):
+                value = str(value)
+            dublinCore[key] = value
+    metadata["dublinCore"] = dublinCore
+
+    # Ajout de dublinCore:
+    members = {}
+    mbers = response.get("member", [])
+    if isinstance(mbers, dict):
+        for key, value in dc.items():
+            if value is None:
+                continue
+
+            # transformer en string si c'est un dict ou une liste
+            if isinstance(value, dict):
+                # par exemple prendre uniquement le label/id si existant
+                value = value.get("label") or value.get("@id") or str(value)
+            elif isinstance(value, list):
+                # transformer la liste en string (ou liste de strings)
+                value = ", ".join(
+                    str(v.get("label") if isinstance(v, dict) else v) for v in value
+                )
+            elif not isinstance(value, str):
+                value = str(value)
+            members[key] = value
+    metadata["members"] = members
 
     return metadata
-
-def index_resource_passages(
-    app,
-    resource_id: str,
-    collection_metadata: dict
-):
-    dts_url = app.config["DTS_URL"]
-    print('index_resource_passages', resource_id)
-    nav_index = build_navigation_index(dts_url, resource_id)
-    print('index_resource_passages nav_index', nav_index)
-
-    xml_response = requests.get(
-        f"{dts_url}/document",
-        params={"resource": resource_id}
-    )
-    xml_response.raise_for_status()
-
-    root = etree.fromstring(xml_response.content)
-    print('index_resource_passages', root)
-    for el in root.xpath("//*[@xml:id]", namespaces=XML_NS):
-        print("⚠️ Checking el", el)
-        passage_id = el.get("{http://www.w3.org/XML/1998/namespace}id")
-
-        # ⚡ NE PRENDRE QUE LES PASSAGES DANS LA NAVIGATION
-        if passage_id not in nav_index:
-            continue
-
-        if not isinstance(el, etree._Element):
-            print("⚠️ Skipping non-element", el)
-            continue
-        text = extract_passage_text(el)
-        print('index_resource_passages text', text)
-
-        if not text:
-            continue
-
-        nav = nav_index.get(passage_id, {})
-        print('index_resource_passages', nav)
-        ancestors = get_ancestors(passage_id, nav_index)
-        print('index_resource_passages', ancestors)
-
-        document = {
-            "resource_id": resource_id,
-            "passage_id": passage_id,
-            "citeType": nav.get("citeType"),
-            "level": nav.get("level"),
-            "content": text,
-            "path": collection_metadata["path"],
-            "path_ids": collection_metadata["path_ids"],
-            "ancestors": ancestors,
-            "metadata": {
-                "collection_id": collection_metadata["id"],
-                "collection_title": collection_metadata["title"],
-                "path": collection_metadata["path"],
-                "path_ids": collection_metadata["path_ids"],
-                "level": collection_metadata["level"],
-                "dublinCore": collection_metadata.get("dublinCore", {}),
-            }
-        }
-
-        app.elasticsearch.index(
-            index=app.config["DOCUMENT_INDEX"],
-            id=f"{resource_id}::{passage_id}",
-            body=document
-        )
-
 
 def index_dts_resource(resource_id, collection_metadata):
     """
@@ -315,95 +227,58 @@ def index_dts_resource(resource_id, collection_metadata):
 
     print(f"Indexed resource {resource_id}")
 
-def crawl_collection(
-    collection_id: str,
-    collection_index: str,
-    visited=None,
-    parent_id=None,
-    parent_path=None,
-    parent_path_ids=None
-):
-    """
-    Crawl recursively a DTS collection and index:
-    - the collection itself in COLLECTION_INDEX
-    - all Resources as passages in DOCUMENT_INDEX
-    """
+def crawl_collection(collection_id, collection_index, visited=None,
+                     parent_id=None, parent_path=None, parent_path_ids=None):
 
     _DTS_URL = app.config['DTS_URL']
 
     if visited is None:
         visited = set()
 
-    # éviter les boucles infinies
     if collection_id in visited:
         return
     visited.add(collection_id)
 
-    # 1️⃣ Récupération de la collection depuis DTS
-    response = requests.get(f"{_DTS_URL}/collection?id={collection_id}")
+    response = requests.get(f'{_DTS_URL}/collection?id={collection_id}')
     response.raise_for_status()
     data = response.json()
 
-    # Ignore si ce n’est pas une collection
     if data.get("@type") != "Collection":
         return
 
-    # 2️⃣ Extraction des métadonnées de la collection
     metadata = extract_metadata(
         data,
         parent_id=parent_id,
         parent_path=parent_path,
         parent_path_ids=parent_path_ids
     )
-    print('/n/n crawl_collection collection_id', collection_id)
-    #print('/n/n crawl_collection data', data)
-    print('/n/n crawl_collection metadata', metadata)
-    # 3️⃣ Création d'un ID sûr pour Elasticsearch
-    collection_es_id = metadata.get("id") or f"collection_{collection_id}"
 
-    # 4️⃣ Indexation de la collection
-    try:
-        app.elasticsearch.index(
-            index=collection_index,
-            id=collection_es_id,
-            body=metadata
-        )
-        print(f"Indexed collection {metadata.get('path', collection_es_id)}")
-    except Exception as e:
-        print(f"Impossible d’indexer la collection {collection_es_id}: {e}")
-        return
+    # indexation collection
+    app.elasticsearch.index(
+        index=collection_index,
+        id=metadata["id"],
+        body=metadata
+    )
 
-    # 5️⃣ Parcours des membres de la collection
+    print(f"Indexed collection {metadata['path']}")
+
+    # parcours des membres
     for member in data.get("member", []):
-        member_type = member.get("@type")
-        member_id = member.get("@id")
-
-        if not member_id:
-            # Ignore les membres sans @id
-            continue
-
-        if member_type == "Collection" and member_id != 'cartulaires':
-            # Appel récursif pour sous-collections
+        if member.get("@type") == "Collection" and member.get("@id") != 'cartulaires':
             crawl_collection(
-                collection_id=member_id,
+                collection_id=member.get("@id"),
                 collection_index=collection_index,
                 visited=visited,
-                parent_id=collection_es_id,
-                parent_path=metadata.get("path"),
-                parent_path_ids=metadata.get("path_ids")
+                parent_id=metadata["id"],
+                parent_path=metadata["path"],
+                parent_path_ids=metadata["path_ids"]
             )
 
-        elif member_type == "Resource":
-            print('crawl member resource ', member_id)
-            print('crawl member resource metadata', metadata)
-            # Indexation du Resource DTS au niveau des passages
-            index_resource_passages(
-                app=app,
-                resource_id=member_id,
+        elif member.get("@type") == "Resource":
+            index_dts_resource(
+                resource_id=member.get("@id"),
                 collection_metadata=metadata
             )
-
-
 
 def make_cli():
     """ Creates a Command Line Interface for everydays tasks

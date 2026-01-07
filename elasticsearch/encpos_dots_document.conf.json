@@ -32,15 +32,6 @@
         "type": "keyword"
       },
 
-      "ancestors": {
-        "type": "nested",
-        "properties": {
-          "id": { "type": "keyword" },
-          "level": { "type": "integer" },
-          "citeType": { "type": "keyword" }
-        }
-      },
-
       "metadata": {
         "type": "object",
         "dynamic": true
