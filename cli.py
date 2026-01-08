@@ -44,6 +44,19 @@ def extract_passage_text(element) -> str:
 def remove_html_tags(text):
     return re.sub(clean_tags, ' ', text)
 
+def normalize_text(text: str) -> str:
+    """
+    Nettoie le texte TEI :
+    - supprime espaces / retours parasites
+    - normalise les espaces
+    """
+    if not text:
+        return ""
+
+    # remplace tous les blancs (espaces, \n, \t) par un espace
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
 
 def extract_body(text):
     match = re.search(body_tag, text)
@@ -294,7 +307,7 @@ def index_dts_resource(resource_id, collection_metadata):
 
     # 3️⃣ Construction du document ES
     document = {
-        "content": content,
+        "content": normalize_text(content),
 
         # métadonnées DTS (remplace le TSV)
         "metadata": resource_metadata,
