@@ -14,7 +14,7 @@ POSSIBLE_ENV_VALUES = [ "local", "staging", "prod" ]
 # Creating a dictionary of flask_app.py options (--config=staging) and their matching environment variables files aliases (staging)
 # Creating a flask_app.py --help listing these options
 parser = argparse.ArgumentParser(
-    description='Flask app for encpos'
+    description='ES app for DoTS'
 )
 parser.add_argument('--config', type=str, choices=POSSIBLE_ENV_VALUES ,default='staging', help="/".join(POSSIBLE_ENV_VALUES) + ' to select the appropriate .env file to use, default=staging', metavar='')
 args = parser.parse_args()
