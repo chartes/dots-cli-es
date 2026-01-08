@@ -203,11 +203,52 @@ def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids
         "dtsVersion": response.get("dtsVersion"),
         "totalItems": response.get("totalItems"),
         "totalChildren": response.get("totalChildren"),
-        "totalParents": response.get("totalParents"),
-
-        "dublinCore": response.get("dublinCore", {}),
-        "members": response.get("member", [])
+        "totalParents": response.get("totalParents")
     }
+
+    # Ajout de dublin Core:
+    dublincore = {}
+    dc = response.get("dublincore", {})
+    if isinstance(dc, dict):
+        for key, value in dc.items():
+            if value is None:
+                continue
+
+            # transformer en string si c'est un dict ou une liste
+            if isinstance(value, dict):
+                # par exemple prendre uniquement le label/id si existant
+                value = value.get("label") or value.get("@id") or str(value)
+            elif isinstance(value, list):
+                # transformer la liste en string (ou liste de strings)
+                value = ", ".join(
+                    str(v.get("label") if isinstance(v, dict) else v) for v in value
+                )
+            elif not isinstance(value, str):
+                value = str(value)
+            dublincore[key] = value
+    metadata["dublincore"] = dublincore
+
+    # Ajout des members:
+    members = {}
+    mbers = response.get("member", [])
+    if isinstance(mbers, dict):
+        for key, value in dc.items():
+            if value is None:
+                continue
+
+            # transformer en string si c'est un dict ou une liste
+            if isinstance(value, dict):
+                # par exemple prendre uniquement le label/id si existant
+                value = value.get("label") or value.get("@id") or str(value)
+            elif isinstance(value, list):
+                # transformer la liste en string (ou liste de strings)
+                value = ", ".join(
+                    str(v.get("label") if isinstance(v, dict) else v) for v in value
+                )
+            elif not isinstance(value, str):
+                value = str(value)
+            members[key] = value
+    metadata["members"] = members
 
     return metadata
 
