@@ -1,5 +1,5 @@
-# The [Position de Thèses](https://theses.chartes.psl.eu/) API
-Elasticsearch API to search the ENC Thesis Abstracts ([Positions de thèses](https://theses.chartes.psl.eu/)).
+# The [DoTS search](https://dev.chartes.psl.eu/dots/api/dts/collection) API
+Elasticsearch API to search the [DoTS collections & resources](https://dev.chartes.psl.eu/dots/api/dts/collection).
 
 ![Static Badge](https://img.shields.io/badge/python-3.12-blue?style=for-the-badge&logo=python&label=PYTHON&color=blue)
 
