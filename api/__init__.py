@@ -4,20 +4,6 @@ from dotenv import load_dotenv
 
 api_bp = Blueprint('api_bp', __name__)
 
-def parse_es_doc_id(es_id: str) -> str:
-    """
-    Parse un _id Elasticsearch de la forme:
-    resource_id::passage_id
-
-    Retourne: resource_id&ref=passage_id
-    """
-    if "::" not in es_id:
-        raise ValueError(f"Invalid ES document id format: {es_id}")
-
-    resource_id, passage_id = es_id.split("::", 1)
-
-    return f"{resource_id}&ref={passage_id}"
-
 def create_app(config_name: str):
     """ Create the application """
     app = Flask(__name__)
@@ -44,7 +30,7 @@ def create_app(config_name: str):
             for h in search_result['hits']['hits']:
                 fields = h.get('_source')
                 fields.pop("content")
-                fields['dts_url'] = f"{app.config['DTS_URL']}/document?resource={parse_es_doc_id(h['_id'])}"
+                fields['dts_url'] = f"{app.config['DTS_URL']}/document?resource={h['_id']}"
                 results.append({
                     "id": h['_id'],
                     "score": h['_score'],
