@@ -143,9 +143,9 @@ def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids
 
         "members": response.get("member", [])
     }
-    # Ajout de dublinCore:
-    dublinCore = {}
-    dc = response.get("dublinCore", {})
+    # Ajout de dublin Core:
+    dublincore = {}
+    dc = response.get("dublincore", {})
     if isinstance(dc, dict):
         for key, value in dc.items():
             if value is None:
@@ -162,8 +162,8 @@ def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids
                 )
             elif not isinstance(value, str):
                 value = str(value)
-            dublinCore[key] = value
-    metadata["dublinCore"] = dublinCore
+            dublincore[key] = value
+    metadata["dublincore"] = dublincore
 
     # Ajout de dublinCore:
     members = {}
