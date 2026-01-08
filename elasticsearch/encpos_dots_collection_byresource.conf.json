@@ -1,0 +1,56 @@
+{
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "id": { "type": "keyword" },
+      "type": { "type": "keyword" },
+
+      "title": {
+        "type": "text",
+        "analyzer": "french",
+        "fields": {
+          "raw": { "type": "keyword" }
+        }
+      },
+
+      "description": {
+        "type": "text",
+        "analyzer": "french"
+      },
+
+      "path": {
+        "type": "keyword"
+      },
+
+      "path_ids": {
+        "type": "keyword"
+      },
+
+      "parent_id": {
+        "type": "keyword"
+      },
+
+      "level": {
+        "type": "integer"
+      },
+
+      "dtsVersion": {
+        "type": "keyword"
+      },
+
+      "totalItems": { "type": "integer" },
+      "totalChildren": { "type": "integer" },
+      "totalParents": { "type": "integer" },
+
+      "dublinCore": {
+        "type": "object",
+        "dynamic": true
+      },
+
+      "members": {
+        "type": "object",
+        "enabled": false
+      }
+    }
+  }
+}

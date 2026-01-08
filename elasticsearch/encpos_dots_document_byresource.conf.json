@@ -1,0 +1,41 @@
+{
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "resource_id": {
+        "type": "keyword"
+      },
+
+      "parent_collection_id": {
+        "type": "keyword"
+      },
+
+      "collection_title": {
+        "type": "keyword"
+      },
+
+      "level": {
+        "type": "integer"
+      },
+
+      "content": {
+        "type": "text",
+        "analyzer": "folding",
+        "term_vector": "with_positions_offsets"
+      },
+
+      "path": {
+        "type": "keyword"
+      },
+
+      "path_ids": {
+        "type": "keyword"
+      },
+
+      "metadata": {
+        "type": "object",
+        "dynamic": true
+      }
+    }
+  }
+}
