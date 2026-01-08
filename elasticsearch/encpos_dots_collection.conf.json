@@ -42,7 +42,7 @@
       "totalChildren": { "type": "integer" },
       "totalParents": { "type": "integer" },
 
-      "dublinCore": {
+      "dublincore": {
         "type": "object",
         "dynamic": true
       },
