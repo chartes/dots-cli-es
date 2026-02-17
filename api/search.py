@@ -4,6 +4,51 @@ import time
 from typing import Callable
 from flask import Response, request, current_app
 
+def parse_filters_param(filters_param: str):
+    """
+    Parse un paramètre filters de type:
+    field1:val1|val2,field2:val3
+
+    Retourne une liste de filtres ES (term / terms)
+    """
+    es_filters = []
+
+    if not filters_param:
+        return es_filters
+
+    for part in filters_param.split(","):
+        if ":" not in part:
+            continue
+
+        field, raw_values = part.split(":", 1)
+        field = field.strip()
+        values = [v.strip() for v in raw_values.split("|") if v.strip()]
+
+        if not values:
+            continue
+
+        # cast simple (int si possible)
+        casted_values = []
+        for v in values:
+            if v.isdigit():
+                casted_values.append(int(v))
+            else:
+                casted_values.append(v)
+
+        # champ numérique → pas de .keyword
+        is_numeric = all(isinstance(v, int) for v in casted_values)
+        es_field = field if is_numeric else f"{field}.keyword"
+
+        if len(casted_values) == 1:
+            es_filters.append({
+                "term": { es_field: casted_values[0] }
+            })
+        else:
+            es_filters.append({
+                "terms": { es_field: casted_values }
+            })
+
+    return es_filters
 
 def parse_range_parameter():
     _range = None
@@ -18,13 +63,52 @@ def parse_range_parameter():
             _parsed_ranges.append(_range)
     return _parsed_ranges
 
+def parse_query_param(query_param: str):
+    """
+    Parse le paramètre query du type:
+    field1:prefix*,field2:"some phrase",field3:te?t
+
+    Retourne une liste de clauses ES pour 'must', gère les wildcards
+    et applique la bonne logique pour text vs keyword.
+    """
+    clauses = []
+    if not query_param:
+        return clauses
+
+    for part in query_param.split(","):
+        part = part.strip()
+        if not part or ":" not in part:
+            continue
+
+        field, value = part.split(":", 1)
+        field = field.strip()
+        value = value.strip().strip('"')
+
+        # Détecte les wildcards
+        if "*" in value or "?" in value:
+            # Si le champ est text (analyse), utiliser query_string
+            clauses.append({
+                "query_string": {
+                    "query": f"{field}:{value}",
+                    "default_operator": "AND"
+                }
+            })
+        else:
+            # Recherche exacte ou phrase
+            clauses.append({
+                "match_phrase_prefix": {
+                    field: value
+                }
+            })
+
+    return clauses
 
 def register_search_endpoint(bp, api_version="1.0", compose_result_func: Callable[[str], list] = lambda s: []):
     def api_search_endpoint():
         start_time: float = time.time()
         # PARAMETERS
         index: str = request.args.get("index", None)
-        query: str = request.args.get("query", None)
+        query_param: str = request.args.get("query", None)
 
         # eg. range[year]=gte:1871,lte:1899
         ranges: list[dict] = parse_range_parameter()
@@ -36,7 +120,9 @@ def register_search_endpoint(bp, api_version="1.0", compose_result_func: Callabl
         no_highlight = request.args.get("no-highlight", False)
         no_highlight = type(no_highlight) == str
 
-        #if query is None:
+        filters_param = request.args.get("filters")
+
+        #if query_param is None:
         #    return Response(status=400)
 
         # if request has pagination parameters
@@ -67,7 +153,7 @@ def register_search_endpoint(bp, api_version="1.0", compose_result_func: Callabl
 
         r = {}
         if hasattr(current_app, 'elasticsearch'):
-            body = {
+            body_query = {
                 "query": {
                     "bool": {
                         "must": [
@@ -79,22 +165,24 @@ def register_search_endpoint(bp, api_version="1.0", compose_result_func: Callabl
                 "aggregations": {
 
                 },
+                "highlight": {},
                 "sort": [
                     #  {"creation": {"order": "desc"}}
                     *sort_criteriae
-                ]
+                ],
+                "track_total_hits": True,
+                "track_scores": True
             }
-            if query:
-                body["query"]["bool"]["must"].append(
-                    {
-                        "query_string": {
-                            "query": query,
-                            "default_operator": "AND"
-                        }
-                    }
-                )
-            if not no_highlight:
-                body["highlight"] = {
+            if query_param:
+                must_clauses = parse_query_param(query_param)
+                if must_clauses:
+                    body_query["query"]["bool"]["must"].extend(must_clauses)
+            else:
+                # Pas de query → match_all
+                body_query["query"]["bool"]["must"].append({"match_all": {}})
+
+            if query_param and not no_highlight:
+                body_query["highlight"] = {
                     "type": "fvh",
                     "fields": {
                         "content": {}
@@ -104,10 +192,10 @@ def register_search_endpoint(bp, api_version="1.0", compose_result_func: Callabl
                 }
 
             if ranges:
-                body["query"]["bool"]['must'].extend([{"range": r} for r in ranges])
+                body_query["query"]["bool"]['must'].extend([{"range": r} for r in ranges])
 
             if groupby_field is not None:
-                body["aggregations"] = {
+                body_query["aggregations"] = {
                     "items": {
                         "composite": {
                             "sources": [
@@ -128,7 +216,7 @@ def register_search_endpoint(bp, api_version="1.0", compose_result_func: Callabl
                         },
                     },
                 }
-                body["size"] = 0
+                body_query["size"] = 0
 
                 sort_criteriae.reverse()
                 #for crit in sort_criteriae:
@@ -143,8 +231,8 @@ def register_search_endpoint(bp, api_version="1.0", compose_result_func: Callabl
                 #        body["aggregations"]["items"]["composite"]["sources"].insert(0, source)
 
                 if groupby_after is not None:
-                    sources_keys = [list(s.keys())[0] for s in body["aggregations"]["items"]["composite"]["sources"]]
-                    body["aggregations"]["items"]["composite"]["after"] = {key: value for key, value in
+                    sources_keys = [list(s.keys())[0] for s in body_query["aggregations"]["items"]["composite"]["sources"]]
+                    body_query["aggregations"]["items"]["composite"]["after"] = {key: value for key, value in
                                                                            zip(sources_keys, groupby_after.split(','))}
                     print(sources_keys, groupby_after,
                           {key: value for key, value in zip(sources_keys, groupby_after.split(','))})
@@ -153,25 +241,34 @@ def register_search_endpoint(bp, api_version="1.0", compose_result_func: Callabl
             # if groupby_field is not None:
             page: int = 0 if groupby_field is not None else num_page - 1
 
-            body["from"]: int = page * page_size
-            body["size"]: int = page_size
+            body_query["from"]: int = page * page_size
+            body_query["size"]: int = page_size
             # else:
             #    body["from"] = 0 * page_size
             #    body["size"] = page_size
             # print("WARNING: /!\ for debug purposes the query size is limited to", body["size"])
+
+            if filters_param:
+                es_filters = parse_filters_param(filters_param)
+                if es_filters:
+                    body_query["query"]["bool"].setdefault("filter", []).extend(es_filters)
+
+            search_result_test = current_app.elasticsearch.search(index=current_app.config["DOCUMENT_INDEX"], body=body_query)
+            print('search_result_test : \n\n')
+            pprint.pprint(search_result_test)
             try:
                 if index is None or len(index) == 0:
                     index = current_app.config["DOCUMENT_INDEX"]
 
-                pprint.pprint(body)
+                pprint.pprint(body_query)
                 # perform the search
-                search_result = current_app.elasticsearch.search(index=index, body=body)
+                search_result = current_app.elasticsearch.search(index=index, body=body_query)
                 #pprint.pprint(search_result['aggregations'])
                 results: list = compose_result_func(search_result)
                 count: int = search_result['hits']['total']['value']
 
                 # print(body, len(results), search['hits']['total'], index)
-                # pprint.pprint(search)
+                pprint.pprint(search_result)
                 if 'aggregations' in search_result:
                     after_key = None
                     buckets = search_result["aggregations"]["items"]["buckets"]
@@ -219,6 +316,7 @@ def register_search_endpoint(bp, api_version="1.0", compose_result_func: Callabl
                 r["duration"] = float('%.4f' % (time.time() - start_time))
 
             except Exception as e:
+                print("ES response error : ", str(e))
                 return Response(str(e), status=400)
 
         return Response(

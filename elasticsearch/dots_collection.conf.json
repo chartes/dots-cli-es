@@ -42,7 +42,17 @@
       "totalChildren": { "type": "integer" },
       "totalParents": { "type": "integer" },
 
+      "download": {
+        "type": "object",
+        "dynamic": true
+      },
+
       "dublincore": {
+        "type": "object",
+        "dynamic": true
+      },
+
+      "extensions": {
         "type": "object",
         "dynamic": true
       },

@@ -11,12 +11,14 @@ def parse_es_doc_id(es_id: str) -> str:
 
     Retourne: resource_id&ref=passage_id
     """
-    if "::" not in es_id:
-        raise ValueError(f"Invalid ES document id format: {es_id}")
+    # if "::" not in es_id:
+    #     raise ValueError(f"Invalid ES document id format: {es_id}")
 
-    resource_id, passage_id = es_id.split("::", 1)
-
-    return f"{resource_id}&ref={passage_id}"
+    if "::" in es_id:
+        resource_id, passage_id = es_id.split("::", 1)
+        return f"{resource_id}&ref={passage_id}"
+    else:
+        return es_id
 
 def create_app(config_name: str):
     """ Create the application """
@@ -43,7 +45,8 @@ def create_app(config_name: str):
             results = []
             for h in search_result['hits']['hits']:
                 fields = h.get('_source')
-                fields.pop("content")
+                # Remove content only if it exists
+                fields.pop("content", None)
                 fields['dts_url'] = f"{app.config['DTS_URL']}/document?resource={parse_es_doc_id(h['_id'])}"
                 results.append({
                     "id": h['_id'],

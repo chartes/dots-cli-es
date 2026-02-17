@@ -23,6 +23,18 @@ class Config(object):
     # encpos specific to adapt ALL_YEARS = parse_var_env('ALL_YEARS')
 
     TARGET_COLLECTION = parse_var_env('TARGET_COLLECTION')
+    CUSTOM_SETTINGS_PATH = os.getenv("ES_CLI_CUSTOM_SETTINGS_PATH")
+    # Liste manuelle de collections à exclure
+    _ADDITIONAL_EXCLUDED_COLLECTIONS_RAW = os.getenv(
+        "ADDITIONAL_EXCLUDED_COLLECTIONS", ""
+    )
+
+    ADDITIONAL_EXCLUDED_COLLECTIONS = [
+        c.strip().lower()
+        for c in _ADDITIONAL_EXCLUDED_COLLECTIONS_RAW.split(",")
+        if c.strip()
+    ]
+
     DTS_URL = parse_var_env('DTS_URL')
 
     API_VERSION = parse_var_env('API_VERSION')

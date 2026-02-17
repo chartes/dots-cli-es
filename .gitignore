@@ -1,3 +1,5 @@
+indexation_reporting/*
+!indexation_reporting/README.md
 venv*/
 .idea/
 __pycache__

@@ -2,6 +2,15 @@
   "mappings": {
     "dynamic": "strict",
     "properties": {
+      "type": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
       "resource_id": {
         "type": "keyword"
       },
@@ -41,7 +50,11 @@
         }
       },
 
-      "metadata": {
+      "collection_metadata": {
+        "type": "object",
+        "dynamic": true
+      },
+      "resource_metadata": {
         "type": "object",
         "dynamic": true
       }
