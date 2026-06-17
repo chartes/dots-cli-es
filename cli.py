@@ -3,29 +3,154 @@ import io
 import json
 import pprint
 import re
-from multiprocessing.resource_sharer import stop
 import os
 import csv
 from datetime import datetime, timezone
 import time
-from typing import Any
+from time import perf_counter
+from typing import Any, Optional
 
 import click
-import requests
+import requests, httpx
+import asyncio
+import yaml
+from elasticsearch import Elasticsearch
+from lxml import etree
 
-from api import create_app
+
+# ============================================================
+# SIMPLE APP OBJECT
+# ============================================================
+
+class App:
+    def __init__(self, config_dict: dict):
+        """Initialize the application with configuration and Elasticsearch client.
+
+        :param config_dict: Flattened configuration dictionary
+        :type config_dict: dict
+        """
+        self.config = config_dict
+        # Initialize Elasticsearch client if URL is provided
+        self.elasticsearch = Elasticsearch(
+            [self.config["ELASTICSEARCH_URL"]]
+        ) if self.config.get("ELASTICSEARCH_URL") else None
+
+        # Combined indexes string for ES
+        self.all_indexes = f"{self.config['DOCUMENT_INDEX']},{self.config['COLLECTION_INDEX']}"
+
+        # Store excluded collections as lowercase for case-insensitive comparison
+        self.excluded_collections = {c.lower() for c in self.config.get("ADDITIONAL_EXCLUDED_COLLECTIONS", [])}
+
+        # Placeholder for indexing statistics
+        self.index_stats = {}
+
+# ============================================================
+# CLI CONTEXT OBJECT
+# ============================================================
+
+class CLIContext:
+    """
+    Object shared across CLI commands.
+    Holds config and lazily builds App when needed.
+    """
+
+    def __init__(self, config_dict: dict):
+        self.config = config_dict
+        self._app: Optional[App] = None
+
+    @property
+    def app(self) -> App:
+        """Lazy instantiation of App."""
+        if self._app is None:
+            self._app = App(self.config)
+        return self._app
+
+# ============================================================
+# LOAD YAML CONFIG
+# ============================================================
+
+def replace_none_with_empty_string(d: Any) -> Any:
+    """Recursively replace all None values in a dict/list with empty strings.
+
+    :param d: Dictionary, list, or value to process
+    :type d: any
+    :return: Dictionary, list, or value with None replaced by ''
+    :rtype: any
+    """
+    if isinstance(d, dict):
+        return {k: replace_none_with_empty_string(v) for k, v in d.items()}
+    elif isinstance(d, list):
+        return [replace_none_with_empty_string(v) for v in d]
+    elif d is None:
+        return ""
+    else:
+        return d
+
+
+def resolve_env_vars(d: Any) -> Any:
+    """Recursively replace environment variable placeholders (e.g., ${VAR}) in strings.
+
+    :param d: Dictionary, list, or value to process
+    :type d: any
+    :return: Dictionary, list, or value with environment variables expanded
+    :rtype: any
+    """
+    if isinstance(d, dict):
+        return {k: resolve_env_vars(v) for k, v in d.items()}
+    elif isinstance(d, list):
+        return [resolve_env_vars(v) for v in d]
+    elif isinstance(d, str):
+        return os.path.expandvars(d)
+    else:
+        return d
+
+
+def load_config(alias: str) -> dict:
+    """Load a YAML configuration file, replace None with empty strings, resolve environment variables,
+    and flatten 'source' + 'config' sections for compatibility with App.
+
+    :param alias: Configuration alias corresponding to config/{alias}.yml
+    :type alias: str
+    :return: Flattened configuration dictionary
+    :rtype: dict
+    :raises FileNotFoundError: if the YAML config file does not exist
+    """
+    config_path = os.path.join("config", f"{alias}.yml")
+
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    # Replace None values with empty strings
+    config = replace_none_with_empty_string(config)
+    # Resolve environment variables
+    config = resolve_env_vars(config)
+
+    # Flatten 'source' and 'config' sections for App compatibility
+    flat_config = {}
+    flat_config.update(config.get("source", {}))
+    flat_config.update(config.get("config", {}))
+
+    # Ensure ADDITIONAL_EXCLUDED_COLLECTIONS exists and is a lowercase set
+    flat_config["ADDITIONAL_EXCLUDED_COLLECTIONS"] = set(
+        c.lower() for c in flat_config.get("ADDITIONAL_EXCLUDED_COLLECTIONS", [])
+    )
+    print('config', flat_config)
+    return flat_config
+
+# ============================================================
+# FUNCTIONS
+# ============================================================
 
 clean_tags = re.compile('<.*?>')
 body_tag = re.compile('<body(?:(?:.|\n)*?)>((?:.|\n)*?)</body>')
 
 app = None
 
-from lxml import etree
-
 XML_NS = {"tei": "http://www.tei-c.org/ns/1.0"}
 
-
-# timestamp pour ce run (UTC, timezone-aware)
 ts = datetime.now(timezone.utc).strftime("%Y_%m_%d_%H_%M")
 
 def count_csv_rows(csv_path: str) -> int:
@@ -101,8 +226,21 @@ def get_indexation_csv_paths(app):
         "indexed_passages_report": os.path.join(
             base_dir,
             f"{ts}_indexed_passages_report.csv"
+        ),
+        "passage_exceptions": os.path.join(
+            base_dir,
+            f"{ts}_passage_exceptions.csv"
         )
     }
+
+def ensure_out_directory_exists():
+    """Assure que le dossier /out existe."""
+    out_dir = "out"
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+        print(f"Dossier '{out_dir}' créé.")
+    else:
+        print(f"Dossier '{out_dir}' déjà existant.")
 
 def sanitize_dts_json(data: dict, app, collection_id: str):
     """
@@ -238,6 +376,69 @@ def report_collection_exception(app, collection_id: str, error: Exception, conte
         }
     )
 
+def report_collection_indexation_errors(app, collection_id: str, error: Exception):
+    _csv_path = get_indexation_csv_paths(app)["collection_exceptions"]
+    report_indexation_event(
+        csv_path=_csv_path,
+        header=[
+            "timestamp",
+            "collection_id",
+            "error_type",
+            "error_message",
+            "context"
+        ],
+        row={
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "collection_id": collection_id,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "context": "collection_indexation"
+        }
+    )
+
+def report_passage_indexation_errors(app, resource_id: str, passage_id: str, error: Exception):
+    _csv_path = get_indexation_csv_paths(app)["passage_exceptions"]
+    report_indexation_event(
+        csv_path=_csv_path,
+        header=[
+            "timestamp",
+            "resource_id",
+            "passage_id",
+            "error_type",
+            "error_message",
+            "context"
+        ],
+        row={
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "resource_id": resource_id,
+            "passage_id": passage_id,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "context": "passage_indexation"
+        }
+    )
+
+def report_resource_indexation_errors(app, resource_id: str, error: Exception):
+    _csv_path = get_indexation_csv_paths(app)["document_exceptions"]
+    report_indexation_event(
+        csv_path=_csv_path,
+        header=[
+            "timestamp",
+            "resource_id",
+            "error_type",
+            "error_message",
+            "context"
+        ],
+        row={
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "resource_id": resource_id,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "context": "document_indexation"
+        }
+    )
+
+
 def report_dts_sanitization(app, collection_id: str, anomalies: list[dict]):
     _csv_path = get_indexation_csv_paths(app)["dts_sanitization"]
 
@@ -350,13 +551,14 @@ def extract_body(text):
     return text
 
 
-def load_elastic_conf(index_name, rebuild=False):
+def load_elastic_conf(app, index_name, rebuild=False):
     url = '/'.join([app.config['ELASTICSEARCH_URL'], index_name])
     res = None
     try:
         if rebuild:
             print(f"Deleting {index_name} index.")
-            res = requests.delete(url)
+            with httpx.Client() as client:
+                res = client.delete(url)
         with open('elasticsearch/_global.conf.json', 'r') as _global:
             global_settings = json.load(_global)
 
@@ -364,8 +566,9 @@ def load_elastic_conf(index_name, rebuild=False):
                 payload = json.load(f)
                 payload["settings"] = global_settings
                 print("UPDATE INDEX CONFIGURATION:", url)
-                res = requests.put(url, json=payload)
-                assert str(res.status_code).startswith("20")
+                with httpx.Client() as client:
+                    res = client.put(url, json=payload)
+                    assert str(res.status_code).startswith("20")
 
     except FileNotFoundError as e:
         print(str(e))
@@ -373,6 +576,20 @@ def load_elastic_conf(index_name, rebuild=False):
     except Exception as e:
         print(res.text, str(e), flush=True, end=" ")
         raise e
+
+def update_conf_internal(cli_ctx: CLIContext, indexes=None, rebuild=False):
+    app = cli_ctx.app
+    if indexes is None:
+        indexes = app.all_indexes
+    if isinstance(indexes, list):
+        indexes = ",".join(indexes)
+    elif not isinstance(indexes, str):
+        indexes = str(indexes)
+
+    for name in indexes.split(','):
+        name = name.strip()
+        if name:
+            load_elastic_conf(app, name, rebuild=rebuild)
 
 def normalize_extension_key(key: str) -> str:
     """
@@ -389,7 +606,7 @@ def normalize_metadata_value(value):
     - scalar → string
     """
     if value is None:
-        return None
+        return ""
 
     if isinstance(value, dict):
         return (
@@ -405,7 +622,7 @@ def normalize_metadata_value(value):
             nv = normalize_metadata_value(v)
             if nv is not None:
                 values.append(nv)
-        return values
+        return values or [""]
 
     # int, float, str, bool…
     return str(value)
@@ -422,17 +639,23 @@ def get_ancestors(passage_id: str, nav_index: dict) -> list:
         ancestors.insert(0, {
             "id": parent["id"],
             "level": parent.get("level"),
-            "citeType": parent.get("citeType")
+            "citeType": parent.get("citeType"),
+            "title": parent.get("title")
         })
         current = parent
 
     return ancestors
 
-def build_navigation_index(app, dts_url: str, resource_id: str) -> dict[Any, Any] | None:
+async def build_navigation_index(app, dts_url: str, resource_id: str, client: httpx.AsyncClient = None) -> dict[Any, Any] | None:
     data = None
+    own_client = False
+    if client is None:
+        client = httpx.AsyncClient()
+        own_client = True
+
     for attempt in range(3):
         try:
-            response = requests.get(
+            response = await client.get(
                 f"{dts_url}/navigation",
                 params={"resource": resource_id, "down": -1}
             )
@@ -441,7 +664,7 @@ def build_navigation_index(app, dts_url: str, resource_id: str) -> dict[Any, Any
             #print('build_navigation_index' , dts_url, resource_id, response)
             break
 
-        except requests.exceptions.HTTPError as e:
+        except httpx.HTTPStatusError as e:
             if attempt == 2:
                 # log proprement l'erreur HTTP
                 report_indexation_event(
@@ -464,7 +687,7 @@ def build_navigation_index(app, dts_url: str, resource_id: str) -> dict[Any, Any
                     }
                 )
                 return None  # 🔥 on skip
-            time.sleep(2)
+            await asyncio.sleep(0.5)
 
         except Exception as e:
             # log toute autre erreur réseau / JSON
@@ -489,6 +712,9 @@ def build_navigation_index(app, dts_url: str, resource_id: str) -> dict[Any, Any
             )
             return None
 
+    if own_client:
+        await client.aclose()
+
     if data is None:
         return None
 
@@ -501,9 +727,10 @@ def build_navigation_index(app, dts_url: str, resource_id: str) -> dict[Any, Any
 
         nav[passage_id] = {
             "id": passage_id,
-            "citeType": item.get("citeType"),
-            "level": item.get("level"),
-            "parent": item.get("parent")
+            "citeType": item.get("citeType", None),
+            "level": item.get("level", None),
+            "title": item.get("dublinCore", {}).get("title", None),
+            "parent": item.get("parent", None)
         }
     #print('build_navigation_index result : ', nav)
     return nav
@@ -529,7 +756,7 @@ def extract_resource_metadata(resource_meta_response: dict) -> dict:
     # Dublin Core (flat structure)
     # ─────────────────────────────
 
-    dc = resource_meta_response.get("dublinCore", {})
+    dc = resource_meta_response.get("dublincore", {})
     if isinstance(dc, dict):
         for key, value in dc.items():
             if value is None:
@@ -582,7 +809,7 @@ def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids
 
     # Add Dublin Core:
     dublincore = {}
-    dc = response.get("dublincore", {})
+    dc = response.get("dublinCore", {})
 
     if isinstance(dc, dict):
         for key, value in dc.items():
@@ -683,29 +910,57 @@ def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids
 
     return metadata
 
-def index_resource_passages(
+async def index_resource_passages_async(
     app,
     resource_id: str,
     collection_metadata: dict,
-    resource_metadata: dict
+    resource_metadata: dict,
+    client: httpx.AsyncClient = None
 ):
+    """
+    Index passages of a DTS resource asynchronously using httpx.AsyncClient.
+    All original logic and comments are preserved.
+    """
+
+    collection_id = collection_metadata["id"]
     dts_url = app.config["DTS_URL"]
     print('index_resource_passages', resource_id)
-    nav_index = build_navigation_index(app, dts_url, resource_id)
+    print('index used for resource indexation', app.config["DOCUMENT_INDEX"])
 
+    # Async fetch navigation index
+    nav_index = await build_navigation_index(app, dts_url, resource_id, client=client)
     if nav_index is None:
         return  # there was an error getting the navigation : we skip the document and go to the next one
 
-    xml_response = requests.get(
-        f"{dts_url}/document",
-        params={"resource": resource_id}
-    )
-    xml_response.raise_for_status()
+    async_client_provided = client is not None
+    client = client or httpx.AsyncClient()  # Shared async client for connection pooling
 
-    root = etree.fromstring(xml_response.content)
+    # Fetch TEI document asynchronously
+    try:
+        xml_response = await client.get(
+            f"{dts_url}/document",
+            params={"resource": resource_id}
+        )
+        xml_response.raise_for_status()
+    except Exception as e:
+        report_indexation_exception(
+            app=app,
+            resource_id=resource_id,
+            passage_id="__fulltext__",
+            error=e,
+            context="index_resource_passages_document_fetch"
+        )
+        if not async_client_provided:
+            await client.aclose()
+        return
 
-    # initialise ES bulk actions for all the resource fragments
-    bulk_actions = []
+    parser = etree.XMLParser(collect_ids=False)
+    start = time.perf_counter()
+    root = etree.XML(xml_response.content, parser)  # type: ignore
+    print("XML parse took", time.perf_counter() - start)
+    # Liste pour stocker les passages à ajouter au fichier JSONL
+    passages = []
+    document = None
 
     # FALLBACK : no DTS fragments for the resource → index all <text>
     if not nav_index:
@@ -727,8 +982,8 @@ def index_resource_passages(
                 "citeType": "text",
                 "level": 1,
                 "content": full_text,
-                "path": collection_metadata["path"],
-                "path_ids": collection_metadata["path_ids"],
+                "path": resource_metadata["path"],
+                "path_ids": resource_metadata["path_ids"],
                 "ancestors": [],
                 "collection_metadata": {
                     "collection_id": collection_metadata["id"],
@@ -736,18 +991,12 @@ def index_resource_passages(
                     "path": collection_metadata["path"],
                     "path_ids": collection_metadata["path_ids"],
                     "level": collection_metadata["level"],
-                    "dublinCore": collection_metadata.get("dublinCore", {}),
+                    "dublincore": collection_metadata.get("dublincore", {}),
                 },
                 "resource_metadata": resource_metadata
             }
 
-            bulk_actions.append({
-                "index": {
-                    "_index": app.config["DOCUMENT_INDEX"],
-                    "_id": f"{resource_id}::__fulltext__"
-                }
-            })
-            bulk_actions.append(document_passage)
+            passages.append(document_passage)
 
             # Passages counter
             app.index_stats["passages"] += 1
@@ -763,10 +1012,10 @@ def index_resource_passages(
                 context="index_resource_passages_fulltext_fallback"
             )
 
-        # 👉 IMPORTANT : in this case, the main loop is skipped
+        # Skip main loop if no navigation index
         nav_index = {}
 
-
+    # Parcours des passages avec navigation
     for passage_id in nav_index:
         try:
             results = root.xpath(
@@ -811,14 +1060,15 @@ def index_resource_passages(
         nav = nav_index.get(passage_id, {})
         ancestors = get_ancestors(passage_id, nav_index)
 
-        document_passages = {
+        document_passage = {
             "resource_id": resource_id,
             "passage_id": passage_id,
             "citeType": nav.get("citeType"),
             "level": nav.get("level"),
+            "title": nav.get("title"),
             "content": text,
-            "path": collection_metadata["path"],
-            "path_ids": collection_metadata["path_ids"],
+            "path": resource_metadata["path"],
+            "path_ids": resource_metadata["path_ids"],
             "ancestors": ancestors,
             "collection_metadata": {
                 "collection_id": collection_metadata["id"],
@@ -826,300 +1076,641 @@ def index_resource_passages(
                 "path": collection_metadata["path"],
                 "path_ids": collection_metadata["path_ids"],
                 "level": collection_metadata["level"],
-                "dublinCore": collection_metadata.get("dublinCore", {}),
+                "dublincore": collection_metadata.get("dublincore", {}),
             },
             "resource_metadata": resource_metadata
         }
-        #print('working till here ', resource_id, passage_id)
 
-        # Add fragment to ES bulk actions
-        bulk_actions.append({
-            "index": {
-                "_index": app.config["DOCUMENT_INDEX"],
-                "_id": f"{resource_id}::{passage_id}"
-            }
-        })
-        bulk_actions.append(document_passages)
-
-        # Fragments counter
+        passages.append(document_passage)
         app.index_stats["passages"] += 1
-
         report_passages_indexation(app, resource_id, passage_id)
 
-    # Bulk load all fragments
-    # pprint.pprint(bulk_actions)
-    if bulk_actions:
-        try:
-            response = app.elasticsearch.bulk(
-                body=bulk_actions,
-                refresh=False
-            )
-        except Exception as e:
-            report_indexation_exception(
-                app=app,
-                resource_id=resource_id,
-                passage_id="*",
-                error=e,
-                context="bulk_index_resource_passages"
-            )
-        else:
-            # Trace ES errors at passage level
-            if response.get("errors"):
-                for item in response.get("items", []):
-                    action = item.get("index", {})
-                    if "error" in action:
-                        es_id = action.get("_id", "")
-                        passage_id = (
-                            es_id.split("::", 1)[1]
-                            if "::" in es_id else es_id
-                        )
-                        report_indexation_exception(
-                            app=app,
-                            resource_id=resource_id,
-                            passage_id=passage_id,
-                            error=Exception(action["error"].get("reason", "ES bulk error")),
-                            context="bulk_index_resource_passages_es_error"
-                        )
-                app.index_stats["bulk_es_errors"] += 1
+    # Ajout des passages dans un fichier JSONL unique par collection
+    if passages:
+        collection_passages_jsonl_path = f"out/{collection_id}_passages.jsonl"
+        with open(collection_passages_jsonl_path, 'a', encoding='utf-8') as f:
+            for passage in passages:
+                f.write(json.dumps(passage) + '\n')
 
-    # Resource indexation
+    # Création du document de ressource
     document = {
         "type": "Resource",
         "level": 0,
         "resource_metadata": resource_metadata
     }
+
+    # Ajout du document dans un fichier JSONL unique par collection
+    collection_documents_jsonl_path = f"out/{collection_id}_documents.jsonl"
+    with open(collection_documents_jsonl_path, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(document) + '\n')
+    app.index_stats['resources'] += 1
+    print(f"Document de la ressource écrit dans {collection_documents_jsonl_path}")
+
+    if not async_client_provided:
+        await client.aclose()
+
+async def index_collection(app, collection_metadata):
+    """
+    Async helper to write collection metadata into a JSONL file and update index stats.
+    """
+    ensure_out_directory_exists()  # Make sure the 'out' folder exists
+
+    collection_id = collection_metadata["id"]
+    collection_jsonl_path = f"out/collections.jsonl"
+
+    # Write collection metadata to JSONL
     try:
-        app.elasticsearch.index(
-            index=app.config["DOCUMENT_INDEX"],
-            id=f"{resource_id}",
-            body=document
-        )
-        # Resources counter (DTS: resources of @type Resource)
-        app.index_stats["resources"] += 1
+        with open(collection_jsonl_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(collection_metadata) + '\n')
+        print(f"Collection indexed and added to {collection_jsonl_path}")
+
+        # Update the stats for indexed collections
+        app.index_stats["collections"] += 1
 
     except Exception as e:
-        report_indexation_exception(
-            app=app,
-            resource_id=resource_id,
-            passage_id="*",
-            error=e,
-            context="index_resource_metadata"
-        )
+        print(f"⚠️ Error indexing collection {collection_id}: {e}")
+        report_collection_exception(app, collection_metadata["id"], e, context="index_collection_exception")
 
+import httpx
 
-def index_dts_resource(resource_id, collection_metadata):
+async def fetch_collection(app, collection_id: str):
     """
-    Indexe une Resource DTS avec :
-    - contenu texte
-    - métadonnées DTS
-    - héritage hiérarchique
+    Fetch collection details from the DTS asynchronously.
     """
+    dts_url = app.config["DTS_URL"]
+    # Si on récupère la collection racine (root_collection_id), ne pas inclure `id`
+    if len(collection_id) == 0:
+        params = {}  # Pas de paramètres, on va chercher la collection DTS racine sans `id`
+    else:
+        params = {"id": collection_id}  # Utiliser l'ID pour d'autres collections
 
-    _DTS_URL = app.config['DTS_URL']
-    _index_name = app.config['DOCUMENT_INDEX']
-
-    # 1️⃣ Fetching resource content from DTS
-    response = requests.get(f'{_DTS_URL}/document', params={"resource": resource_id})
-    response.raise_for_status()
-
-    content = extract_body(response.text)
-    content = remove_html_tags(content)
-
-    # 2️⃣ Fetching resource metadata from DTS
-    meta_response = requests.get(
-        f'{_DTS_URL}/collection',
-        params={"id": resource_id}
-    )
-    meta_response.raise_for_status()
-
-    resource_meta_response = meta_response.json()
-    resource_metadata = extract_resource_metadata(resource_meta_response)
-
-    # 3️⃣ Building ES record
-    document = {
-        "content": normalize_text(content),
-
-        # DTS metadata (remplacing former TSV)
-        "metadata": resource_metadata,
-
-        # hierarchy
-        "parent_collection_id": collection_metadata["id"],
-        "path": f'{collection_metadata["path"]} > {resource_metadata.get("title", resource_id)}',
-        "path_ids": collection_metadata["path_ids"] + [resource_id],
-        "level": len(collection_metadata["path_ids"]),
-        "collection_title": collection_metadata["title"]
-    }
-
-    app.elasticsearch.index(
-        index=_index_name,
-        id=resource_id,
-        body=document
-    )
-
-    print(f"Indexed resource {resource_id}")
-
-def crawl_collection(
-    collection_id: str,
-    collection_index: str,
-    target_collections: set = None,
-    visited=None,
-    parent_id=None,
-    parent_path=None,
-    parent_path_ids=None
-):
-    """
-    Crawl recursively a DTS collection and index:
-    - the collection itself in COLLECTION_INDEX
-    - all Resources as passages in DOCUMENT_INDEX
-    """
-    if collection_id.lower() in app.excluded_collections:
-        print(f"⏭️  Collection exclue : {collection_id}")
-        return
-
-    _DTS_URL = app.config['DTS_URL']
-
-    if visited is None:
-        visited = set()
-
-    # Avoid infinite loops within collections
-    if collection_id in visited:
-        return
-    visited.add(collection_id)
-
-    collection_start = time.perf_counter()
-
-    # 1️⃣ Get collection details from DTS
-    try:
-        response = requests.get(f"{_DTS_URL}/collection?id={collection_id}")
-        response.raise_for_status()
-        #data = response.json()
-        data = sanitize_dts_json(response.json(), app, collection_id)
-        #print('data test', data)
-    except Exception as e:
-        print(f"⚠️ Impossible de récupérer la collection {collection_id}: {e}")
-        report_collection_exception(app, collection_id, e, context="crawl_collection_dts_response")
-        return  # Do no attenmpt to crawl the collection in this case
-
-    # Ignore if not a collection
-    if data.get("@type") != "Collection":
-        return
-
-    # 2️⃣ Extract collection metadata
-    collection_metadata = extract_metadata(
-        data,
-        parent_id=parent_id,
-        parent_path=parent_path,
-        parent_path_ids=parent_path_ids
-    )
-
-    #print('/n/n crawl_collection collection_id', collection_id)
-    #print('/n/n crawl_collection data', data)
-    #print('/n/n crawl_collection collection_metadata', collection_metadata)
-    # 3️⃣ Normalized collection id for ES
-    collection_es_id = collection_metadata.get("id") or f"collection_{collection_id}"
-
-    # Check if collection should be included
-    collection_id_lc = collection_id.lower()
-
-    index_current = (
-            target_collections is None
-            or collection_id_lc in target_collections
-            or (parent_id and parent_id.lower() in target_collections)
-    )
-    #print('\n\n TEST index_current ', index_current, collection_id.lower(), target_collections)
-
-    # 4️⃣ Collection indexation (if collection in allowed scope)
-    if index_current:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            # Projects and collections counter (only effectively indexed ones)
-            if collection_metadata.get("level") == 1:
-                app.index_stats["projects"] += 1
-            elif collection_metadata.get("level") > 1:
-                app.index_stats["collections"] += 1
-
-            app.elasticsearch.index(
-                index=collection_index,
-                id=collection_es_id,
-                body=collection_metadata
+            response = await client.get(
+                f"{dts_url}/collection",
+                params=params
             )
-            print(f"Indexed collection {collection_metadata.get('path', collection_es_id)}")
+            response.raise_for_status()
+            return sanitize_dts_json(response.json(), app, collection_id)  # Returns the collection metadata
+        except httpx.HTTPStatusError as e:
+            print(f"⚠️ HTTP Error when fetching collection {collection_id}: {e}")
+            report_collection_exception(app, collection_id, e, context="fetch_collection_http_error")
         except Exception as e:
-            print(f"Impossible d’indexer la collection {collection_es_id}: {e}")
-            report_collection_exception(app, collection_id, e, context="crawl_collection_indexation")
-            return
+            print(f"⚠️ General error when fetching collection {collection_id}: {e}")
+            report_collection_exception(app, collection_id, e, context="fetch_collection_exception")
+    return None
 
-    # 5️⃣ Parcours des membres de la collection
-    for member in data.get("member", []):
-        member_type = member.get("@type")
-        member_id = member.get("@id")
 
-        if not member_id:
-            # Ignore les membres sans @id
-            continue
+async def get_parent_collection(app, current_id, stop_at, stop_at_name):
+    """
+    Async helper to fetch the parent collection ID from the DTS API based on the current collection ID.
+    This function sends a request to the DTS API to retrieve metadata for the given collection ID.
+    If the parent collection exists, it returns the parent ID.
 
-        if member_type == "Collection":
-            # Appel récursif pour sous-collections
-            crawl_collection(
-                collection_id=member_id,
-                collection_index=collection_index,
-                target_collections=target_collections,
-                visited=visited,
-                parent_id=collection_es_id,
-                parent_path=collection_metadata.get("path"),
-                parent_path_ids=collection_metadata.get("path_ids")
+    :param app: The application context, containing configuration (DTS URL).
+    :param current_id: The current collection ID for which the parent ID is to be fetched.
+    :return: Parent collection ID if exists, otherwise None.
+    """
+    dts_url = app.config["DTS_URL"]
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Fetch metadata for the current collection
+            response = await client.get(f"{dts_url}/collection", params={"id": current_id, "nav": 'parents'})
+            response.raise_for_status()  # Check for errors in the response
+
+            # Parse response
+            data = response.json()
+            # Extract the parent ID from the metadata
+            if data.get("member"):
+                parent_id = data["member"][0]["@id"]
+                parent_label = data["member"][0]['title']
+            else:
+                parent_id = stop_at
+                parent_label = stop_at_name
+
+            if parent_id:
+                return [parent_id, parent_label, data.get("title")]
+            else:
+                return None  # No parent collection found
+
+    except Exception as e:
+        print(f"⚠️ Error fetching parent collection ID for {current_id}: {e}")
+        return None  # In case of an error, return None
+
+
+async def build_parent_chain(app, collection_id: str, stop_at: str | None = None, stop_at_name: str | None = None) -> list[str]:
+    """
+    Build the parent breadcrumb chain for a target collection.
+    Stops if stop_at is reached (optional).
+    Returns a list of collection_ids from root -> target.
+    """
+    chain = []
+    chain_label = []
+    current_id = collection_id
+
+    while current_id:
+        if current_id in chain:
+            # Prevent infinite loops
+            break
+
+        chain.insert(0, current_id)  # prepend to have root -> target
+        print('await result', stop_at, stop_at_name)
+        result = await get_parent_collection(app, current_id, stop_at, stop_at_name) # async helper fetching DTS metadata
+        print('result', result)
+        current_name = result[2]
+
+        if current_id != stop_at:
+            chain_label.insert(0, current_name)
+        parent_id = result[0]
+        parent_label = result[1]
+        print('build_parent parent_id / parent_label', parent_id, parent_label)
+        if stop_at and parent_id == stop_at:
+            chain.insert(0, parent_id)
+            chain_label.insert(0, parent_label)
+            break
+        current_id = parent_id
+
+    return [chain, chain_label]
+
+async def crawl_branch(app, chain: list[str], chain_label: list[str], collection_index: str, target_collections: set | None, visited: set, semaphore: asyncio.Semaphore, parent_id=None, parent_path=None, parent_path_ids=None,
+    in_target_branch=False):
+    """
+    Crawl a single branch of collections from root -> target.
+    Only indexes collections in target_collections or non-excluded.
+    """
+    print('crawl_branch debug chain', chain)
+    print('crawl_branch debug chain_label', chain_label)
+    for collection_id in chain:
+        collection_id_lc = collection_id.lower()
+
+        is_target = (
+                target_collections is not None
+                and collection_id_lc in {c.lower() for c in target_collections}
+        )
+
+        in_target_branch = in_target_branch or is_target
+        print('crawl_branch debug target_collections, is_target, in_target_branch', collection_id, collection_id_lc, target_collections,
+              is_target, in_target_branch)
+        async with semaphore:
+            # Skip already visited collections
+            if collection_id in visited:
+                continue
+            visited.add(collection_id)
+
+            # Fetch collection details
+            try:
+                data = await fetch_collection(app, collection_id)  # async helper
+            except Exception as e:
+                print(f"⚠️ Impossible de récupérer la collection {collection_id}: {e}")
+                report_collection_exception(app, collection_id, e, context="crawl_branch_fetch")
+                continue
+            print("data for collection_id", collection_id + '\n')
+
+            if not data or data.get("@type") != "Collection":
+                continue
+
+            # Decide whether to index this collection
+            index_current = (
+                collection_id_lc not in app.excluded_collections
+                and (target_collections is None or in_target_branch)
+            )
+            print('index_current test ', collection_id_lc not in app.excluded_collections)
+            print('index_current test 2 ', target_collections is None)
+            print('index_current test 3 ', collection_id in chain)
+            print('index_current test 4 ', target_collections is None or in_target_branch)
+            print('index_current test for collection_id_lc ', collection_id_lc, index_current)
+
+            # Extract collection metadata and path_ids
+            collection_metadata = extract_metadata(
+            data,
+            parent_id=parent_id,
+            parent_path=parent_path,
+            parent_path_ids=parent_path_ids
             )
 
-        elif member_type == "Resource":
-            #print('crawl member resource ', member_id)
-            #print('crawl member collection_metadata', collection_metadata)
+            collection_es_id = collection_metadata.get("id") or f"collection_{collection_id}"
 
-            # indexer uniquement si parent ou descendant est ciblé
-            #print('\n\n TEST index_current member_type == "Resource"', index_current)
             if index_current:
-                resource_start = time.perf_counter()
+                print('indexing collection index_current', index_current)
+                await index_collection(app, collection_metadata)  # async helper: writes JSONL + stats
 
-                resource_metadata = extract_metadata(
-                    member,
-                    parent_id=collection_es_id,
-                    parent_path=collection_metadata.get("path"),
-                    parent_path_ids=collection_metadata.get("path_ids")
-                )
+            # Crawl members recursively
+            for member in data.get("member", []):
+                member_type = member.get("@type")
+                member_id = member.get("@id")
+                member_chain_label = member.get("title")
+                if not member_id:
+                    continue
+                member_chain = [member_id]
+                member_chain_label = [member_chain_label]
+                print('recursive crawling member ', member_id)
+                if member_type == "Collection":
+                    # Always explore the branch for target collections
+                    #member_chain = [member_id]
+                    print("looping throught member_id", member_id + '\n')
+                    # if target_collections and member_id.lower() not in target_collections:
+                    #     # continue only if the member leads to a target
+                    #     parent_path = collection_metadata.get("path", [])
+                    #     parent_path_ids = collection_metadata.get("path_ids", [])
+                    #     print("parent_path", parent_path)
+                    #     print("parent_path_ids ", collection_metadata.get("path_ids", []) )
+                    #     if member_id.lower() not in parent_path_ids:
+                    #         print("member_id not in parent_path member_id", member_id.lower() + '\n')
+                    #         print("member_id not in parent_path parent_path_ids", parent_path_ids)
+                    #         continue
+                    # Pass updated path_ids to child collection
+                    print('crawled member : ', member)
+                    await crawl_branch(
+                        app=app,
+                        chain=member_chain,
+                        chain_label= member_chain_label,
+                        collection_index=collection_index,
+                        target_collections=target_collections,
+                        visited=visited,
+                        semaphore=semaphore,
+                        parent_id=collection_es_id,
+                        parent_path=collection_metadata.get("path"),
+                        parent_path_ids=collection_metadata.get("path_ids"),
+                        in_target_branch = in_target_branch
+                    )
 
-                # Indexation du Resource DTS au niveau des passages
-                index_resource_passages(
-                    app=app,
-                    resource_id=member_id,
-                    collection_metadata=collection_metadata,
-                    resource_metadata=resource_metadata
-                )
+                elif member_type == "Resource":
+                    # Only index resources if parent or descendant is targeted
+                    if index_current:
+                        resource_metadata = extract_metadata(
+                            member,
+                            parent_id=parent_id,
+                            parent_path=collection_metadata.get("path"),
+                            parent_path_ids=collection_metadata.get("path_ids")
+                        )
+                        await index_resource_passages_async(
+                            app=app,
+                            resource_id=member_id,
+                            collection_metadata=collection_metadata,
+                            resource_metadata=resource_metadata
+                        )
 
-                resource_duration = time.perf_counter() - resource_start
 
-                report_timing(
-                    get_indexation_csv_paths(app)["timing"],
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "level": "resource",
-                        "id": member_id,
-                        "parent_id": collection_id,
-                        "duration_sec": round(resource_duration, 3),
-                        "duration_hms": format_duration(resource_duration),
-                    }
-                )
-    collection_duration = time.perf_counter() - collection_start
 
-    report_timing(
-        get_indexation_csv_paths(app)["timing"],
-        {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": "collection",
-            "id": collection_id,
-            "parent_id": parent_id or "",
-            "duration_sec": round(collection_duration, 3),
-            "duration_hms": format_duration(collection_duration),
+async def crawl_collection(app, collection_id: str, collection_index: str, target_collections: set | None = None, parent_id=None, parent_path=None, parent_path_ids=None):
+    """
+    Entry point to crawl collections.
+    Handles full tree or only branches leading to target_collections.
+    """
+    semaphore = asyncio.Semaphore(app.config.get("MAX_CONCURRENT_REQUESTS", 5))
+    visited = set()
+
+    root_collection_id = app.config['TARGET_COLLECTION']
+    root_collection_name = app.config['TARGET_COLLECTION_NAME']
+
+    if target_collections:
+        tasks = []
+        for coll in target_collections:
+            # Build breadcrumb from root to target
+            print('crawl debug', root_collection_name)
+            result = await build_parent_chain(app, coll, stop_at=root_collection_id, stop_at_name=root_collection_name)
+            chain = result[0]
+            chain_label = result[1]
+            print('crawl_collection debug chain', chain)
+            print('crawl_collection debug chain_label', chain_label)
+            parent_id = chain[-2]
+            print('crawl_collection debug parent_id', parent_id)
+            tasks.append(crawl_branch(app, chain, chain_label, collection_index, target_collections, visited, semaphore, parent_id, parent_path, parent_path_ids))
+        await asyncio.gather(*tasks)
+    else:
+        # Full tree crawl
+        await crawl_branch(
+            app=app,
+            chain=[root_collection_id],
+            chain_label=[],
+            collection_index=collection_index,
+            target_collections=None,
+            visited=visited,
+            semaphore=semaphore,
+            parent_id=root_collection_id,
+            parent_path=None,
+            parent_path_ids=None
+        )
+
+# async def crawl_collection(
+#     app: object,
+#     collection_id: str,
+#     collection_index: str,
+#     target_collections: set = None,
+#     visited=None,
+#     parent_id=None,
+#     parent_path=None,
+#     parent_path_ids=None,
+#     client: httpx.AsyncClient = None
+# ):
+#     """
+#     Crawl recursively a DTS collection and index:
+#     - the collection itself in a single COLLECTION JSONL file (out/collections.jsonl)
+#     - its resources and its passages as passages in JSONL file (out/{collection_id}_documents.jsonl & out/{collection_id}_passages.jsonl)
+#     """
+#     print("Collection check : ", collection_id, parent_path_ids)
+#     print("Target collection check : ", target_collections)
+#
+#
+#     _DTS_URL = app.config['DTS_URL']
+#
+#     if visited is None:
+#         visited = set()
+#
+#     # Avoid infinite loops within collections
+#     if collection_id in visited:
+#         return
+#     visited.add(collection_id)
+#
+#     collection_start = time.perf_counter()
+#
+#     # 1️⃣ Get collection details from DTS
+#     async_client_provided = client is not None
+#     client = client or httpx.AsyncClient()  # Shared async client for connection pooling
+#
+#     try:
+#         start = time.perf_counter()
+#         response = await client.get(f"{_DTS_URL}/collection?id={collection_id}")
+#         response.raise_for_status()
+#         print(f"GET collection {collection_id} took : ", time.perf_counter() - start)
+#         start = time.perf_counter()
+#         data = sanitize_dts_json(response.json(), app, collection_id)
+#         print(f"anitize_dts_json {collection_id} took : ", time.perf_counter() - start)
+#     except Exception as e:
+#         print(f"⚠️ Impossible de récupérer la collection {collection_id}: {e}")
+#         report_collection_exception(app, collection_id, e, context="crawl_collection_dts_response")
+#         if not async_client_provided:
+#             await client.aclose()
+#         return  # Do no attempt to crawl the collection in this case
+#
+#     # Ignore if not a collection
+#     if data.get("@type") != "Collection":
+#         if not async_client_provided:
+#             await client.aclose()
+#         return
+#
+#     # 2️⃣ Extract collection metadata
+#     collection_metadata = extract_metadata(
+#         data,
+#         parent_id=parent_id,
+#         parent_path=parent_path,
+#         parent_path_ids=parent_path_ids
+#     )
+#
+#     collection_es_id = collection_metadata.get("id") or f"collection_{collection_id}"
+#
+#     # 3️⃣ Normalized collection id for ES
+#     collection_id_lc = collection_id.lower()
+#     index_current = (
+#             target_collections is None
+#             or collection_id_lc in target_collections
+#             or (parent_id and parent_id.lower() in target_collections)
+#     )
+#
+#     # 4️⃣ Collection indexation (if collection in allowed scope)
+#     if index_current:
+#         try:
+#             # Projects and collections counter (only effectively indexed ones)
+#             if collection_metadata.get("level") == 1:
+#                 app.index_stats["projects"] += 1
+#             elif collection_metadata.get("level") > 1:
+#                 app.index_stats["collections"] += 1
+#
+#             # Ajout de la collection dans un fichier JSONL unique
+#             ensure_out_directory_exists()  # Assurez-vous que le dossier /out existe
+#
+#             collections_jsonl_path = "out/collections.jsonl"
+#             with open(collections_jsonl_path, 'a', encoding='utf-8') as f:
+#                 f.write(json.dumps(collection_metadata) + '\n')
+#             print(f"Collection indexée et ajoutée dans {collections_jsonl_path}")
+#
+#         except Exception as e:
+#             print(f"Impossible d’indexer la collection {collection_es_id}: {e}")
+#             report_collection_exception(app, collection_id, e, context="crawl_collection_indexation")
+#             if not async_client_provided:
+#                 await client.aclose()
+#             return
+#
+#     # 5️⃣ Parcours des membres de la collection (en récursif si ce sont des sous-collections)
+#     tasks = []
+#     semaphore = asyncio.Semaphore(app.config.get("MAX_CONCURRENT_REQUESTS", 5))  # Limit concurrent requests
+#
+#     async def crawl_member(member):
+#         async with semaphore:
+#             member_type = member.get("@type")
+#             member_id = member.get("@id")
+#             if not member_id:
+#                 return
+#
+#             if member_type == "Collection":
+#
+#                 if collection_id_lc not in app.excluded_collections or (collection_id_lc in app.excluded_collections and member_id.lower() in target_collections):
+#                     await crawl_collection(
+#                         app=app,
+#                         collection_id=member_id,
+#                         collection_index=collection_index,
+#                         target_collections=target_collections,
+#                         visited=visited,
+#                         parent_id=collection_es_id,
+#                         parent_path=collection_metadata.get("path"),
+#                         parent_path_ids=collection_metadata.get("path_ids"),
+#                         client=client
+#                     )
+#
+#             elif member_type == "Resource" and index_current:
+#                 resource_start = time.perf_counter()
+#
+#                 resource_metadata = extract_metadata(
+#                     member,
+#                     parent_id=collection_es_id,
+#                     parent_path=collection_metadata.get("path"),
+#                     parent_path_ids=collection_metadata.get("path_ids")
+#                 )
+#
+#                 # Async resource indexing, preserves original functionality
+#                 await index_resource_passages_async(
+#                     app=app,
+#                     resource_id=member_id,
+#                     collection_metadata=collection_metadata,
+#                     resource_metadata=resource_metadata,
+#                     client=client
+#                 )
+#
+#                 resource_duration = time.perf_counter() - resource_start
+#
+#                 report_timing(
+#                     get_indexation_csv_paths(app)["timing"],
+#                     {
+#                         "timestamp": datetime.now(timezone.utc).isoformat(),
+#                         "level": "resource",
+#                         "id": member_id,
+#                         "parent_id": collection_id,
+#                         "duration_sec": round(resource_duration, 3),
+#                         "duration_hms": format_duration(resource_duration),
+#                     }
+#                 )
+#
+#     for member in data.get("member", []):
+#         tasks.append(crawl_member(member))
+#
+#     # Execute all collection/resource crawl tasks concurrently
+#     await asyncio.gather(*tasks)
+#
+#     collection_duration = time.perf_counter() - collection_start
+#
+#     report_timing(
+#         get_indexation_csv_paths(app)["timing"],
+#         {
+#             "timestamp": datetime.now(timezone.utc).isoformat(),
+#             "level": "collection",
+#             "id": collection_id,
+#             "parent_id": parent_id or "",
+#             "duration_sec": round(collection_duration, 3),
+#             "duration_hms": format_duration(collection_duration),
+#         }
+#     )
+#
+#     if not async_client_provided:
+#         await client.aclose()
+
+
+async def dotsplorer(app, collections, _index_name):
+    """
+        Commande principale d'indexation :
+        - Purge /out
+        - Crawl des collections et resources
+        - Écriture des fichiers JSONL
+        - Indexation Elasticsearch via index_jsonl()
+        - Optionally, limit indexing to specific collections with --collections.
+    """
+    # Purge previous DTS fetch result (/out folder)
+    out_dir = os.path.join(os.getcwd(), "out")
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+    for filename in os.listdir(out_dir):
+        file_path = os.path.join(out_dir, filename)
+        try:
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            print(f"⚠️ Impossible to purge {file_path}: {e}")
+    print("Folder /out purged prior fetching/crawl DTS")
+
+    # Crawl DTS collections to extract collection/resource/fragment data for indexing
+    try:
+        # collection racine DTS
+        root_collection_id = app.config['TARGET_COLLECTION'] or ""
+        print('dosplorer TARGET_COLLECTION', app.config['TARGET_COLLECTION'], root_collection_id, len(root_collection_id))
+        if len(root_collection_id) == 0:
+            dts_root_collection = await fetch_collection(app, "")
+            print('dosplorer dts_root_collection response', dts_root_collection)
+            app.config['TARGET_COLLECTION'] = dts_root_collection["@id"]
+            app.config['TARGET_COLLECTION_NAME'] = dts_root_collection["title"]
+        else:
+            root_collection = await fetch_collection(app, root_collection_id)
+            app.config['TARGET_COLLECTION_NAME'] = root_collection["title"]
+        root_collection_id = app.config['TARGET_COLLECTION']
+        print('dosplorer root_collection_id', root_collection_id, app.config['TARGET_COLLECTION_NAME'])
+        print("Crawling DTS collections and resources from root_collection_id: ", root_collection_id, app.config['TARGET_COLLECTION_NAME'])
+
+        # collection exclusion
+        settings_excluded = load_excluded_collections_from_settings(
+            app.config.get("CUSTOM_SETTINGS_PATH")
+        )
+        print("A custom setting folder was defined: ", app.config.get("CUSTOM_SETTINGS_PATH"))
+        print("These settings will exclude the following collections ids: ", settings_excluded)
+
+        manual_excluded = app.config.get("ADDITIONAL_EXCLUDED_COLLECTIONS")
+        print("You have manually also excluded the following collections ids:", manual_excluded)
+
+        excluded_collections = settings_excluded | manual_excluded
+
+        app.excluded_collections = excluded_collections
+
+        # statistiques partagées du run d'indexation
+        app.index_stats = {
+            "projects": 0,  # collections sans parent
+            "collections": 0,  # collections avec parent
+            "resources": 0,
+            "passages": 0,
+            "bulk_es_errors": 0
         }
-    )
 
+        start_time = time.perf_counter()
+
+        print("Crawling DTS collections and resources from root_collection_id …", root_collection_id)
+        # fichiers horodatés (calculés après que app soit créé)
+        csv_paths = get_indexation_csv_paths(app)
+
+        # création des fichiers de reporting vides avec header
+        ensure_csv_file(csv_paths["document_exceptions"], [
+            "timestamp", "resource_id", "passage_id", "error_type", "error_message", "context"
+        ])
+        ensure_csv_file(csv_paths["document_no_text"], [
+            "timestamp", "resource_id", "passage_id", "citeType", "level", "reason", "context"
+        ])
+        ensure_csv_file(csv_paths["collection_exceptions"], [
+            "timestamp", "collection_id", "error_type", "error_message", "context"
+        ])
+        ensure_csv_file(csv_paths["indexed_passages_report"], [
+            "timestamp", "resource_id", "passage_id"
+        ])
+
+        # --- traitement des collections ciblées ---
+        if collections:
+            # split et suppression des espaces autour
+            target_collections = {c.strip() for c in collections.split(",") if c.strip()}
+            print(f"Collections ciblées pour l'indexation: {target_collections}")
+        else:
+            target_collections = None  # tout indexer
+
+        await crawl_collection(
+            app=app,
+            collection_id=root_collection_id,
+            collection_index=_index_name,
+            target_collections=target_collections
+        )
+        # ─────────────────────────────
+        # Résumé de fin d’indexation
+        # ─────────────────────────────
+
+        doc_errors = count_csv_rows(csv_paths["document_exceptions"])
+        doc_no_text = count_csv_rows(csv_paths["document_no_text"])
+        collection_errors = count_csv_rows(csv_paths["collection_exceptions"])
+
+        end_time = time.perf_counter()
+        duration = format_duration(end_time - start_time)
+
+        stats = app.index_stats
+
+        target = app.config.get("TARGET_COLLECTION")
+        print('dosplorer target', target)
+
+        if target:
+            title = f"📊  Résumé du crawler de la collection cible {target}"
+        else:
+            title = "📊  Résumé du crawler"
+
+        print("\n" + "=" * 60)
+        print(title)
+        print("=" * 60)
+        print(f"🗂️  Projets (collections racine) : {stats['projects']}")
+        print(f"📁  Sous-collections             : {stats['collections']}")
+        print(f"📄  Resources crawlées           : {stats['resources']}")
+        print(f"🧩  Passages crawlées            : {stats['passages']}")
+        print("────────────────────────")
+        print(f"📄  Passages en erreur           : {doc_errors}")
+        print(f"📄  Passages sans texte          : {doc_no_text}")
+        print(f"🗂️  Collections en erreur        : {collection_errors}")
+        print("────────────────────────")
+        print(f"🕒  Timestamp du crawler             : {ts}")
+        print(f"⏱️  Durée totale du crawler          : {duration}")
+        print("=" * 60 + "\n")
+        #print("DTS collections and documents indexed successfully.")
+
+    except Exception as e:
+        print('Indexation error (collections): ', str(e))
 
 def make_cli():
     """ Creates a Command Line Interface for everydays tasks
@@ -1129,251 +1720,247 @@ def make_cli():
 
     @click.group()
     @click.option('--config', default="staging", type=click.Choice(["local", "staging", "prod"]), help="select appropriate .env file to use", show_default=True)
-    def cli(config):
-        global app
-        app = create_app(config)
-        app.all_indexes = f"{app.config['DOCUMENT_INDEX']},{app.config['COLLECTION_INDEX']}"
+    @click.pass_context
+    def cli(ctx, config):
+        config_dict = load_config(config)
+        ctx.obj = CLIContext(config_dict)
 
     @click.command("search")
     @click.argument('query')
     @click.option('--indexes', required=False, default=None, help="index names separated by a comma")
     @click.option('-t', '--term', is_flag=True, help="use a term instead of a whole query")
-    def search(query, indexes, term):
+    @click.pass_obj
+    def search(cli_ctx: CLIContext, query, indexes, term):
         """
         Perform a search using the provided query. Use --term or -t to simply search a term.
         """
+        app = cli_ctx.app
+        indexes = indexes or app.all_indexes
+
         if term:
-            body = {
-                "query": {
-                    "bool": {
-                        "must": [
-                            {
-                                "query_string": {
-                                    "query": query,
-                                }
-                            }
-                        ]
-                    },
+            es_query = {
+                "query_string": {
+                    "query": query
                 }
             }
         else:
-            body = query
+            es_query = {
+                "match": {
+                    "content": query
+                }
+            }
 
-        config = {"index": indexes if indexes else app.all_indexes, "body": body}
+        result = app.elasticsearch.search(
+            index=indexes,
+            query=es_query
+        )
 
-        result = app.elasticsearch.search(**config)
         print("\n", "=" * 12, " RESULT ", "=" * 12)
         pprint.pprint(result)
 
     @click.command("update-conf")
     @click.option('--indexes', default=None, help="index names separated by a comma")
     @click.option('--rebuild', is_flag=True, help="truncate the index before updating its configuration")
-    def update_conf(indexes, rebuild):
+    @click.pass_obj
+    def update_conf(cli_ctx: CLIContext, indexes, rebuild):
         """
         Update the index configuration and mappings
         """
-        indexes = indexes if indexes else app.all_indexes
-        for name in indexes.split(','):
-            load_elastic_conf(name, rebuild=rebuild)
+        update_conf_internal(cli_ctx, indexes=indexes, rebuild=rebuild)
 
     @click.command("delete")
     @click.option('--indexes', required=True, help="index names separated by a comma")
-    def delete_indexes(indexes):
+    @click.pass_obj
+    def delete_indexes(cli_ctx: CLIContext, indexes):
         """
         Delete the indexes
         """
-        indexes = indexes if indexes else app.all_indexes
+        app = cli_ctx.app
+        indexes = indexes or app.all_indexes
+
         for name in indexes.split(','):
             url = '/'.join([app.config['ELASTICSEARCH_URL'], name])
             res = None
             try:
                 print(f"Deleting {name} index.")
-                res = requests.delete(url)
+                with httpx.Client() as client:
+                    res = client.delete(url)
             except Exception as e:
                 print(res.text, str(e), flush=True, end=" ")
                 raise e
 
     @click.command("index")
     @click.option('--years', required=True, default="all", help="1987-1999")
-    @click.option("--collections", "-c", default=None, help="Comma separated collection ids to index, ex: coll1, coll2,coll3")
-    def index(years, collections):
+    @click.option("--collections", "-c", default=None,
+                  help="Comma separated collection ids to index, ex: coll1, coll2,coll3")
+    @click.pass_obj
+    def index(cli_ctx: CLIContext, years, collections):
         """
-        Rebuild the elasticsearch indexes
-        Optionally, limit indexing to specific collections with --collections.
+            Commande principale d'indexation :
+            - Purge /out
+            - Crawl des collections et resources
+            - Écriture des fichiers JSONL
+            - Indexation Elasticsearch via index_jsonl()
+                - passages (DOCUMENT_INDEX)
+                - documents (DOCUMENT_INDEX)
+                - collections (COLLECTION_INDEX)
+            - Optionally, limit indexing to specific collections with --collections.
         """
-        _index_name = app.config["DOCUMENT_INDEX"]
-        if not app.elasticsearch.indices.exists(index=_index_name):
-            print(f"Index {_index_name} not found.")
-            load_elastic_conf(_index_name, rebuild=False)
 
-        # _DTS_URL = app.config["DTS_URL"]
-        # _target_collection = app.config["TARGET_COLLECTION"]
-        # # BUILD THE METADATA DICT FROM THE GITHUB TSV FILE
-        #
-        # response = requests.get(f'{_DTS_URL}/collection?id={_target_collection}')
-        # metadata = {}
-        # print('response collection DTS URL', response.text)
-        #
-        # reader = DictReader(io.StringIO(response.text), delimiter="\t")
-        # for row in reader:
-        #     try:
-        #         metadata[row["id"]] = {
-        #             "author_name": row["author_name"],
-        #             "author_firstname": row["author_firstname"],
-        #             "title_rich": row["title_rich"],
-        #             "promotion_year": int(row["promotion_year"]) if row["promotion_year"] else None,
-        #             "topic_notBefore": int(row["topic_notBefore"]) if row["topic_notBefore"] else None,
-        #             "topic_notAfter": int(row["topic_notAfter"]) if row["topic_notAfter"] else None,
-        #             "author_gender": int(row["author_gender"]) if row["author_gender"] else None,
-        #                 # 1/2, verify that there is no other value
-        #             "author_is_enc_teacher": 1 if row["author_is_enc_teacher"]=="1" else None,
-        #         }
-        #     except Exception as exc:
-        #         print(f"ERROR while indexing {row['id']}, {exc}")
-        #
-        # # INDEXATION DES DOCUMENTS
-        # all_docs = []
-        # try:
-        #     if years == "all":
-        #         years = app.config["ALL_YEARS"]
-        #     start_year, end_year = (int(y) for y in years.split("-"))
-        #     print("Fetching documents from DTS")
-        #     for year in range(start_year, end_year + 1):
-        #
-        #         _ids = [
-        #             d
-        #             for d in metadata.keys()
-        #             if str(year) in d and "_PREV" not in d and "_NEXT" not in d
-        #         ]
-        #
-        #         for encpos_id in _ids:
-        #             response = requests.get(f'{_DTS_URL}/document?resource={encpos_id}')
-        #             print(encpos_id, response.status_code)
-        #
-        #             content = extract_body(response.text)
-        #             content = remove_html_tags(content)
-        #             all_docs.append("\n".join([
-        #                 json.dumps(
-        #                     {"index": {"_index": _index_name, "_id": encpos_id}}
-        #                 ),
-        #                 json.dumps(
-        #                     {"content": content, "metadata": metadata[encpos_id]}
-        #                 )
-        #             ]))
-        #
-        #     print("Indexig documents in elasticsearch")
-        #     app.elasticsearch.bulk(body=all_docs, request_timeout=60*10)
-        #
-        # except Exception as e:
-        #     print('Indexation error: ', str(e))
+       # crawler and extract DTS data
+        app = cli_ctx.app
+        es = app.elasticsearch
+        doc_index = app.config["DOCUMENT_INDEX"]
 
-        # INDEXATION DES COLLECTIONS (DTS)
+        print('index collections:', collections)
+        print('index _index_name:', app.config['COLLECTION_INDEX'])
+        print('index _index_name:', app.config['DOCUMENT_INDEX'])
         try:
             _index_name = app.config['COLLECTION_INDEX']
-
-            # collection racine DTS
-            root_collection_id = app.config['TARGET_COLLECTION']
-            print("Crawling DTS collections and resources from root_collection_id: ", root_collection_id)
-
-            # collection exclusion
-            settings_excluded = load_excluded_collections_from_settings(
-                app.config.get("CUSTOM_SETTINGS_PATH")
-            )
-            print("A custom setting folder was defined: ", app.config.get("CUSTOM_SETTINGS_PATH"))
-            print("These settings will exclude the following collections ids: ", settings_excluded)
-
-            manual_excluded = set(app.config.get("ADDITIONAL_EXCLUDED_COLLECTIONS", []))
-            print("You have manually also excluded the following collections ids:", manual_excluded)
-
-            excluded_collections = settings_excluded | manual_excluded
-
-            app.excluded_collections = excluded_collections
-
-            # statistiques partagées du run d'indexation
-            app.index_stats = {
-                "projects": 0,  # collections sans parent
-                "collections": 0,  # collections avec parent
-                "resources": 0,
-                "passages": 0,
-                "bulk_es_errors": 0
-            }
-
-            start_time = time.perf_counter()
-
-            print("Crawling DTS collections and resources from root_collection_id …", root_collection_id)
-            # fichiers horodatés (calculés après que app soit créé)
-            csv_paths = get_indexation_csv_paths(app)
-
-            # création des fichiers de reporting vides avec header
-            ensure_csv_file(csv_paths["document_exceptions"], [
-                "timestamp", "resource_id", "passage_id", "error_type", "error_message", "context"
-            ])
-            ensure_csv_file(csv_paths["document_no_text"], [
-                "timestamp", "resource_id", "passage_id", "citeType", "level", "reason", "context"
-            ])
-            ensure_csv_file(csv_paths["collection_exceptions"], [
-                "timestamp", "collection_id", "error_type", "error_message", "context"
-            ])
-            ensure_csv_file(csv_paths["indexed_passages_report"], [
-                "timestamp", "resource_id", "passage_id"
-            ])
-
-            # --- traitement des collections ciblées ---
-            if collections:
-                # split et suppression des espaces autour
-                target_collections = {c.strip().lower() for c in collections.split(",") if c.strip()}
-                print(f"Collections ciblées pour l'indexation: {target_collections}")
-            else:
-                target_collections = None  # tout indexer
-
-            crawl_collection(
-                collection_id=root_collection_id,
-                collection_index=_index_name,
-                target_collections=target_collections
-            )
-            # ─────────────────────────────
-            # Résumé de fin d’indexation
-            # ─────────────────────────────
-
-            doc_errors = count_csv_rows(csv_paths["document_exceptions"])
-            doc_no_text = count_csv_rows(csv_paths["document_no_text"])
-            collection_errors = count_csv_rows(csv_paths["collection_exceptions"])
-
-            end_time = time.perf_counter()
-            duration = format_duration(end_time - start_time)
-
-            stats = app.index_stats
-
-            target = app.config.get("TARGET_COLLECTION")
-
-            if target:
-                title = f"📊  Résumé de l’indexation de la collection cible {target}"
-            else:
-                title = "📊  Résumé de l’indexation"
-
-            print("\n" + "=" * 60)
-            print(title)
-            print("=" * 60)
-            print(f"🗂️  Projets (collections racine) : {stats['projects']}")
-            print(f"📁  Sous-collections            : {stats['collections']}")
-            print(f"📄  Resources indexées          : {stats['resources']}")
-            print(f"🧩  Passages indexés            : {stats['passages']}")
-            print("────────────────────────")
-            print(f"📄  Passages en erreur        : {doc_errors}")
-            print(f"📄  Passages sans texte       : {doc_no_text}")
-            print(f"🗂️  Collections en erreur     : {collection_errors}")
-            print(f"❌  Erreurs ES (bulk)           : {stats['bulk_es_errors']}")
-            print("────────────────────────")
-            print(f"🕒  Timestamp du run          : {ts}")
-            print(f"⏱️  Durée totale du run       : {duration}")
-            print("=" * 60 + "\n")
-            #print("DTS collections and documents indexed successfully.")
+            asyncio.run(dotsplorer(
+                app=app,
+                collections=collections,
+                _index_name=_index_name
+            ))
 
         except Exception as e:
-            print('Indexation error (collections): ', str(e))
+            print('dotsplorer error (collections): ', str(e))
+
+
+        # Indexation ES
+        # try:
+        if not es.indices.exists(index=doc_index):
+            print(f"⚠️ Index {doc_index} not found → creating with correct mapping")
+            # Appel positionnel correct pour update_conf
+            update_conf_internal(cli_ctx, indexes=doc_index, rebuild=True)
+        else:
+            print(f"✅ Index {doc_index} exists, nothing to do for mapping")
+        # except Exception as e:
+        #     print(f"❌ Erreur lors de la vérification ou création de l’index {doc_index}: {e}")
+        #     return
+
+        out_dir = os.path.join(os.getcwd(), "out")
+        if not os.path.exists(out_dir):
+            print("⚠️ Aucun dossier /out trouvé.")
+            return
+
+        # Lister tous les fichiers JSONL dans /out
+        all_files = [f for f in os.listdir(out_dir) if f.endswith(".jsonl")]
+
+        # -----------------------------
+        # 1️⃣ Indexer les passages
+        # -----------------------------
+        start_fragments_indexation = time.perf_counter()
+
+        passage_files = [f for f in all_files if f.endswith("_passages.jsonl")]
+        for passage_file in passage_files:
+            bulk_actions = []
+            path = os.path.join(out_dir, passage_file)
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        doc = json.loads(line)
+                        bulk_actions.append({"index": {"_index": app.config["DOCUMENT_INDEX"],
+                                                       "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'}})
+                        bulk_actions.append(doc)
+                    except Exception as e:
+                        report_passage_indexation_errors(
+                            app,
+                            resource_id=doc.get("resource_id", "*"),
+                            passage_id=doc.get("passage_id", "*"),
+                            error=e
+                        )
+            if bulk_actions:
+                try:
+                    response = app.elasticsearch.bulk(body=bulk_actions, refresh=False)
+                except Exception as e:
+                    report_passage_indexation_errors(app, resource_id="*", passage_id="*", error=e)
+                else:
+                    if response.get("errors"):
+                        for item in response.get("items", []):
+                            action = item.get("index", {})
+                            if "error" in action:
+                                es_id = action.get("_id", "")
+                                passage_id = es_id.split("::", 1)[1] if "::" in es_id else es_id
+                                resource_id = es_id.split("::", 1)[0] if "::" in es_id else "*"
+                                report_passage_indexation_errors(
+                                    app,
+                                    resource_id=resource_id,
+                                    passage_id=passage_id,
+                                    error=Exception(action["error"].get("reason", "ES bulk error"))
+                                )
+                        app.index_stats["bulk_es_errors"] += 1
+            app.index_stats["passages_indexed"] = app.index_stats.get("passages_indexed", 0) + len(bulk_actions) // 2
+
+        end_fragments_indexation = time.perf_counter()
+
+        # -----------------------------
+        # 2️⃣ Indexer les documents
+        # -----------------------------
+        start_documents_indexation = time.perf_counter()
+
+        document_files = [f for f in all_files if f.endswith("_documents.jsonl")]
+        for document_file in document_files:
+            path = os.path.join(out_dir, document_file)
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        doc = json.loads(line)
+                        app.elasticsearch.index(
+                            index=app.config["DOCUMENT_INDEX"],
+                            id=doc["resource_metadata"]["id"],
+                            body=doc
+                        )
+                        app.index_stats["resources_indexed"] = app.index_stats.get("resources_indexed", 0) + 1
+                    except Exception as e:
+                        report_resource_indexation_errors(app, resource_id=doc.get("resource_id", "*"), error=e)
+
+        end_documents_indexation = time.perf_counter()
+
+        # -----------------------------
+        # 3️⃣ Indexer les collections
+        # -----------------------------
+        start_collections_indexation = time.perf_counter()
+
+        collection_file = os.path.join(out_dir, "collections.jsonl")
+        if os.path.exists(collection_file):
+            with open(collection_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        collection = json.loads(line)
+                        collection_es_id = collection.get("id") or f"collection_{collection.get('@id', 'unknown')}"
+                        app.elasticsearch.index(
+                            index=app.config["COLLECTION_INDEX"],
+                            id=collection_es_id,
+                            body=collection
+                        )
+                        app.index_stats["collections_indexed"] = app.index_stats.get("collections_indexed", 0) + 1
+                    except Exception as e:
+                        report_collection_indexation_errors(app, collection_id=collection.get("id", "*"), error=e)
+
+        end_collections_indexation = time.perf_counter()
+
+        timer_collections_indexation = end_collections_indexation - start_collections_indexation
+        timer_documents_indexation = end_documents_indexation - start_documents_indexation
+        timer_fragments_indexation = end_fragments_indexation - start_fragments_indexation
+        timer_total_indexation = timer_collections_indexation + timer_documents_indexation + timer_fragments_indexation
+
+        print("\n" + "=" * 60)
+        print("📊  Résumé de l’indexation")
+        print("=" * 60)
+        print(f"❌  Erreurs ES (bulk)                    : ")#{ app.index_stats["bulk_es_errors"] }
+        print(f"🗂️  Durée indexation collection         : { format_duration(timer_collections_indexation) }")
+        print(f"📁  Durée indexation documents          : { timer_documents_indexation }")
+        print(f"📄  Durée indexation fragments          : { timer_fragments_indexation }")
+        print(f"🧩  Durée totale d'indexation           : { timer_total_indexation }")
+
+
 
     cli.add_command(delete_indexes)
     cli.add_command(update_conf)
     cli.add_command(index)
     cli.add_command(search)
     return cli
+
+if __name__ == "__main__":
+    make_cli()()

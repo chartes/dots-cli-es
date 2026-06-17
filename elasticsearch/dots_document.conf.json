@@ -27,6 +27,12 @@
         "type": "integer"
       },
 
+      "title": {
+        "type": "text",
+        "analyzer": "folding",
+        "term_vector": "with_positions_offsets"
+      },
+
       "content": {
         "type": "text",
         "analyzer": "folding",
@@ -46,7 +52,8 @@
         "properties": {
           "id": { "type": "keyword" },
           "level": { "type": "integer" },
-          "citeType": { "type": "keyword" }
+          "citeType": { "type": "keyword" },
+          "title": { "type": "keyword" }
         }
       },
 
