@@ -819,29 +819,6 @@ def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids
             dublincore[key] = normalized
 
     metadata["dublincore"] = dublincore
-    # if isinstance(dc, dict):
-    #     for key, value in dc.items():
-    #         if value is None:
-    #             continue
-    #
-    #         # transformer en string si c'est un dict ou une liste
-    #         if isinstance(value, dict):
-    #             # par exemple prendre uniquement le label/id si existant
-    #             value = value.get("label") or value.get("@id") or str(value)
-    #         elif isinstance(value, list):
-    #             normalized = []
-    #             for v in value:
-    #                 if isinstance(v, dict):
-    #                     normalized.append(
-    #                         v.get("label") or v.get("@id") or str(v)
-    #                     )
-    #                 else:
-    #                     normalized.append(str(v))
-    #             value = ", ".join(normalized)
-    #         elif not isinstance(value, str):
-    #             value = str(value)
-    #         dublincore[key] = value
-    # metadata["dublincore"] = dublincore
 
     # Add extensions:
     extensions = {}
@@ -855,31 +832,6 @@ def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids
             extensions[key] = normalized
 
     metadata["extensions"] = extensions
-    # extensions = {}
-    # ext = response.get("extensions", {})
-    # if isinstance(dc, dict):
-    #     for key, value in ext.items():
-    #         if value is None:
-    #             continue
-    #
-    #         # transformer en string si c'est un dict ou une liste
-    #         if isinstance(value, dict):
-    #             # par exemple prendre uniquement le label/id si existant
-    #             value = value.get("label") or value.get("@id") or str(value)
-    #         elif isinstance(value, list):
-    #             normalized = []
-    #             for v in value:
-    #                 if isinstance(v, dict):
-    #                     normalized.append(
-    #                         v.get("label") or v.get("@id") or str(v)
-    #                     )
-    #                 else:
-    #                     normalized.append(str(v))
-    #             value = ", ".join(normalized)
-    #         elif not isinstance(value, str):
-    #             value = str(value)
-    #         extensions[key] = value
-    # metadata["extensions"] = extensions
 
     # Add members:
     members = {}
@@ -913,7 +865,7 @@ def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids
 async def index_resource_passages_async(
     app,
     resource_id: str,
-    collection_metadata: dict,
+    collections: list,
     resource_metadata: dict,
     client: httpx.AsyncClient = None
 ):
@@ -921,6 +873,7 @@ async def index_resource_passages_async(
     Index passages of a DTS resource asynchronously using httpx.AsyncClient.
     All original logic and comments are preserved.
     """
+    collection_metadata = collections[0]
 
     collection_id = collection_metadata["id"]
     dts_url = app.config["DTS_URL"]
@@ -985,14 +938,14 @@ async def index_resource_passages_async(
                 "path": resource_metadata["path"],
                 "path_ids": resource_metadata["path_ids"],
                 "ancestors": [],
-                "collection_metadata": {
+                "collections": [{
                     "collection_id": collection_metadata["id"],
                     "collection_title": collection_metadata["title"],
                     "path": collection_metadata["path"],
                     "path_ids": collection_metadata["path_ids"],
                     "level": collection_metadata["level"],
                     "dublincore": collection_metadata.get("dublincore", {}),
-                },
+                }],
                 "resource_metadata": resource_metadata
             }
 
@@ -1070,14 +1023,14 @@ async def index_resource_passages_async(
             "path": resource_metadata["path"],
             "path_ids": resource_metadata["path_ids"],
             "ancestors": ancestors,
-            "collection_metadata": {
+            "collections": [{
                 "collection_id": collection_metadata["id"],
                 "collection_title": collection_metadata["title"],
                 "path": collection_metadata["path"],
                 "path_ids": collection_metadata["path_ids"],
                 "level": collection_metadata["level"],
                 "dublincore": collection_metadata.get("dublincore", {}),
-            },
+            }],
             "resource_metadata": resource_metadata
         }
 
@@ -1103,6 +1056,7 @@ async def index_resource_passages_async(
     collection_documents_jsonl_path = f"out/{collection_id}_documents.jsonl"
     with open(collection_documents_jsonl_path, 'a', encoding='utf-8') as f:
         f.write(json.dumps(document) + '\n')
+
     app.index_stats['resources'] += 1
     print(f"Document de la ressource écrit dans {collection_documents_jsonl_path}")
 
@@ -1347,7 +1301,7 @@ async def crawl_branch(app, chain: list[str], chain_label: list[str], collection
                         await index_resource_passages_async(
                             app=app,
                             resource_id=member_id,
-                            collection_metadata=collection_metadata,
+                            collections=[collection_metadata],
                             resource_metadata=resource_metadata
                         )
 
@@ -1392,187 +1346,6 @@ async def crawl_collection(app, collection_id: str, collection_index: str, targe
             parent_path=None,
             parent_path_ids=None
         )
-
-# async def crawl_collection(
-#     app: object,
-#     collection_id: str,
-#     collection_index: str,
-#     target_collections: set = None,
-#     visited=None,
-#     parent_id=None,
-#     parent_path=None,
-#     parent_path_ids=None,
-#     client: httpx.AsyncClient = None
-# ):
-#     """
-#     Crawl recursively a DTS collection and index:
-#     - the collection itself in a single COLLECTION JSONL file (out/collections.jsonl)
-#     - its resources and its passages as passages in JSONL file (out/{collection_id}_documents.jsonl & out/{collection_id}_passages.jsonl)
-#     """
-#     print("Collection check : ", collection_id, parent_path_ids)
-#     print("Target collection check : ", target_collections)
-#
-#
-#     _DTS_URL = app.config['DTS_URL']
-#
-#     if visited is None:
-#         visited = set()
-#
-#     # Avoid infinite loops within collections
-#     if collection_id in visited:
-#         return
-#     visited.add(collection_id)
-#
-#     collection_start = time.perf_counter()
-#
-#     # 1️⃣ Get collection details from DTS
-#     async_client_provided = client is not None
-#     client = client or httpx.AsyncClient()  # Shared async client for connection pooling
-#
-#     try:
-#         start = time.perf_counter()
-#         response = await client.get(f"{_DTS_URL}/collection?id={collection_id}")
-#         response.raise_for_status()
-#         print(f"GET collection {collection_id} took : ", time.perf_counter() - start)
-#         start = time.perf_counter()
-#         data = sanitize_dts_json(response.json(), app, collection_id)
-#         print(f"anitize_dts_json {collection_id} took : ", time.perf_counter() - start)
-#     except Exception as e:
-#         print(f"⚠️ Impossible de récupérer la collection {collection_id}: {e}")
-#         report_collection_exception(app, collection_id, e, context="crawl_collection_dts_response")
-#         if not async_client_provided:
-#             await client.aclose()
-#         return  # Do no attempt to crawl the collection in this case
-#
-#     # Ignore if not a collection
-#     if data.get("@type") != "Collection":
-#         if not async_client_provided:
-#             await client.aclose()
-#         return
-#
-#     # 2️⃣ Extract collection metadata
-#     collection_metadata = extract_metadata(
-#         data,
-#         parent_id=parent_id,
-#         parent_path=parent_path,
-#         parent_path_ids=parent_path_ids
-#     )
-#
-#     collection_es_id = collection_metadata.get("id") or f"collection_{collection_id}"
-#
-#     # 3️⃣ Normalized collection id for ES
-#     collection_id_lc = collection_id.lower()
-#     index_current = (
-#             target_collections is None
-#             or collection_id_lc in target_collections
-#             or (parent_id and parent_id.lower() in target_collections)
-#     )
-#
-#     # 4️⃣ Collection indexation (if collection in allowed scope)
-#     if index_current:
-#         try:
-#             # Projects and collections counter (only effectively indexed ones)
-#             if collection_metadata.get("level") == 1:
-#                 app.index_stats["projects"] += 1
-#             elif collection_metadata.get("level") > 1:
-#                 app.index_stats["collections"] += 1
-#
-#             # Ajout de la collection dans un fichier JSONL unique
-#             ensure_out_directory_exists()  # Assurez-vous que le dossier /out existe
-#
-#             collections_jsonl_path = "out/collections.jsonl"
-#             with open(collections_jsonl_path, 'a', encoding='utf-8') as f:
-#                 f.write(json.dumps(collection_metadata) + '\n')
-#             print(f"Collection indexée et ajoutée dans {collections_jsonl_path}")
-#
-#         except Exception as e:
-#             print(f"Impossible d’indexer la collection {collection_es_id}: {e}")
-#             report_collection_exception(app, collection_id, e, context="crawl_collection_indexation")
-#             if not async_client_provided:
-#                 await client.aclose()
-#             return
-#
-#     # 5️⃣ Parcours des membres de la collection (en récursif si ce sont des sous-collections)
-#     tasks = []
-#     semaphore = asyncio.Semaphore(app.config.get("MAX_CONCURRENT_REQUESTS", 5))  # Limit concurrent requests
-#
-#     async def crawl_member(member):
-#         async with semaphore:
-#             member_type = member.get("@type")
-#             member_id = member.get("@id")
-#             if not member_id:
-#                 return
-#
-#             if member_type == "Collection":
-#
-#                 if collection_id_lc not in app.excluded_collections or (collection_id_lc in app.excluded_collections and member_id.lower() in target_collections):
-#                     await crawl_collection(
-#                         app=app,
-#                         collection_id=member_id,
-#                         collection_index=collection_index,
-#                         target_collections=target_collections,
-#                         visited=visited,
-#                         parent_id=collection_es_id,
-#                         parent_path=collection_metadata.get("path"),
-#                         parent_path_ids=collection_metadata.get("path_ids"),
-#                         client=client
-#                     )
-#
-#             elif member_type == "Resource" and index_current:
-#                 resource_start = time.perf_counter()
-#
-#                 resource_metadata = extract_metadata(
-#                     member,
-#                     parent_id=collection_es_id,
-#                     parent_path=collection_metadata.get("path"),
-#                     parent_path_ids=collection_metadata.get("path_ids")
-#                 )
-#
-#                 # Async resource indexing, preserves original functionality
-#                 await index_resource_passages_async(
-#                     app=app,
-#                     resource_id=member_id,
-#                     collection_metadata=collection_metadata,
-#                     resource_metadata=resource_metadata,
-#                     client=client
-#                 )
-#
-#                 resource_duration = time.perf_counter() - resource_start
-#
-#                 report_timing(
-#                     get_indexation_csv_paths(app)["timing"],
-#                     {
-#                         "timestamp": datetime.now(timezone.utc).isoformat(),
-#                         "level": "resource",
-#                         "id": member_id,
-#                         "parent_id": collection_id,
-#                         "duration_sec": round(resource_duration, 3),
-#                         "duration_hms": format_duration(resource_duration),
-#                     }
-#                 )
-#
-#     for member in data.get("member", []):
-#         tasks.append(crawl_member(member))
-#
-#     # Execute all collection/resource crawl tasks concurrently
-#     await asyncio.gather(*tasks)
-#
-#     collection_duration = time.perf_counter() - collection_start
-#
-#     report_timing(
-#         get_indexation_csv_paths(app)["timing"],
-#         {
-#             "timestamp": datetime.now(timezone.utc).isoformat(),
-#             "level": "collection",
-#             "id": collection_id,
-#             "parent_id": parent_id or "",
-#             "duration_sec": round(collection_duration, 3),
-#             "duration_hms": format_duration(collection_duration),
-#         }
-#     )
-#
-#     if not async_client_provided:
-#         await client.aclose()
 
 
 async def dotsplorer(app, collections, _index_name):
@@ -1812,6 +1585,25 @@ def make_cli():
         es = app.elasticsearch
         doc_index = app.config["DOCUMENT_INDEX"]
 
+        MERGE_COLLECTIONS_SCRIPT = """
+        if (ctx._source.collections == null) {
+          ctx._source.collections = params.collections;
+        } else {
+          for (c in params.collections) {
+            boolean exists = false;
+            for (e in ctx._source.collections) {
+              if (e.collection_id == c.collection_id) {
+                exists = true;
+                break;
+              }
+            }
+            if (!exists) {
+              ctx._source.collections.add(c);
+            }
+          }
+        }
+        """
+
         print('index collections:', collections)
         print('index _index_name:', app.config['COLLECTION_INDEX'])
         print('index _index_name:', app.config['DOCUMENT_INDEX'])
@@ -1860,9 +1652,30 @@ def make_cli():
                 for line in f:
                     try:
                         doc = json.loads(line)
-                        bulk_actions.append({"index": {"_index": app.config["DOCUMENT_INDEX"],
-                                                       "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'}})
-                        bulk_actions.append(doc)
+
+                        # TODO: Previous mono-collection process to remove once multi-collection approach validated
+                        # bulk_actions.append({"index": {"_index": app.config["DOCUMENT_INDEX"],
+                        #                                "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'}})
+                        # bulk_actions.append(doc)
+
+                        bulk_actions.append({
+                            "update": {
+                                "_index": app.config["DOCUMENT_INDEX"],
+                                "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'
+                            }
+                        })
+
+                        bulk_actions.append({
+                            "scripted_upsert": True,
+                            "script": {
+                                "lang": "painless",
+                                "source": MERGE_COLLECTIONS_SCRIPT,
+                                "params": {
+                                    "collections": doc.get("collections", [])
+                                }
+                            },
+                            "upsert": doc
+                        })
                     except Exception as e:
                         report_passage_indexation_errors(
                             app,

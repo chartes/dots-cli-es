@@ -57,9 +57,19 @@
         }
       },
 
-      "collection_metadata": {
-        "type": "object",
-        "dynamic": true
+      "collections": {
+        "type": "nested",
+        "properties": {
+          "collection_id": { "type": "keyword" },
+          "collection_title": { "type": "keyword" },
+          "path": { "type": "keyword" },
+          "path_ids": { "type": "keyword" },
+          "level": { "type": "integer" },
+          "dublincore": {
+            "type": "object",
+            "dynamic": true
+          }
+        }
       },
       "resource_metadata": {
         "type": "object",
