@@ -1,5 +1,3 @@
-from csv import DictReader
-import io
 import json
 import pprint
 import re
@@ -7,11 +5,10 @@ import os
 import csv
 from datetime import datetime, timezone
 import time
-from time import perf_counter
 from typing import Any, Optional
 
 import click
-import requests, httpx
+import httpx
 import asyncio
 import yaml
 from elasticsearch import Elasticsearch
@@ -253,13 +250,13 @@ def sanitize_dts_json(data: dict, app, collection_id: str):
     anomalies = []
 
     def clean(value, path="root"):
-        # 🔁 Cas dictionnaire
+        # Cas dictionnaire
         if isinstance(value, dict):
             cleaned = {}
             for k, v in value.items():
                 current_path = f"{path}.{k}"
 
-                # 🔴 Clé vide
+                # Clé vide
                 if not k or k.strip() == "":
                     anomalies.append({
                         "collection_id": collection_id,
@@ -274,7 +271,7 @@ def sanitize_dts_json(data: dict, app, collection_id: str):
 
             return cleaned
 
-        # 🔁 Cas liste
+        # Cas liste
         elif isinstance(value, list):
             cleaned_list = []
             for idx, item in enumerate(value):
@@ -627,6 +624,40 @@ def normalize_metadata_value(value):
     # int, float, str, bool…
     return str(value)
 
+def build_ancestor_cache(nav_index: dict) -> dict:
+    cache = {}
+
+    def compute(pid):
+        if pid in cache:
+            return cache[pid]
+
+        node = nav_index.get(pid)
+        if not node or not node.get("parent"):
+            cache[pid] = []
+            return []
+
+        parent_id = node["parent"]
+        parent = nav_index.get(parent_id)
+
+        if not parent:
+            cache[pid] = []
+            return []
+
+        ancestors = compute(parent_id) + [{
+            "id": parent["id"],
+            "level": parent.get("level"),
+            "citeType": parent.get("citeType"),
+            "title": parent.get("title")
+        }]
+
+        cache[pid] = ancestors
+        return ancestors
+
+    for pid in nav_index:
+        compute(pid)
+
+    return cache
+
 def get_ancestors(passage_id: str, nav_index: dict) -> list:
     ancestors = []
     current = nav_index.get(passage_id)
@@ -686,7 +717,7 @@ async def build_navigation_index(app, dts_url: str, resource_id: str, client: ht
                         "context": "dts_navigation"
                     }
                 )
-                return None  # 🔥 on skip
+                return None  # skip
             await asyncio.sleep(0.5)
 
         except Exception as e:
@@ -720,7 +751,7 @@ async def build_navigation_index(app, dts_url: str, resource_id: str, client: ht
 
     nav = {}
     for item in data.get("member", []):
-        # utilisez 'identifier' au lieu de 'id'
+        # attention utilisez 'identifier' au lieu de 'id'
         passage_id = item.get("identifier")
         if not passage_id:
             continue  # ignore les items sans identifiant
@@ -882,8 +913,12 @@ async def index_resource_passages_async(
 
     # Async fetch navigation index
     nav_index = await build_navigation_index(app, dts_url, resource_id, client=client)
+
     if nav_index is None:
         return  # there was an error getting the navigation : we skip the document and go to the next one
+
+    ancestor_cache = build_ancestor_cache(nav_index)
+
 
     async_client_provided = client is not None
     client = client or httpx.AsyncClient()  # Shared async client for connection pooling
@@ -910,8 +945,22 @@ async def index_resource_passages_async(
     parser = etree.XMLParser(collect_ids=False)
     start = time.perf_counter()
     root = etree.XML(xml_response.content, parser)  # type: ignore
+    XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
+
+    wanted_ids = set(nav_index.keys())
+
+    xmlid_index = {}
+
+    for elem in root.iter():
+        xml_id = elem.get(XML_ID)
+
+        if xml_id in wanted_ids:
+            xmlid_index[xml_id] = elem
+
+            if len(xmlid_index) == len(wanted_ids):
+                break
     print("XML parse took", time.perf_counter() - start)
-    # Liste pour stocker les passages à ajouter au fichier JSONL
+    # Initialise list to store passages to add to JSONL file
     passages = []
     document = None
 
@@ -968,18 +1017,13 @@ async def index_resource_passages_async(
         # Skip main loop if no navigation index
         nav_index = {}
 
-    # Parcours des passages avec navigation
+    # Verifying if nav_index actually exist in TEI
     for passage_id in nav_index:
         try:
-            results = root.xpath(
-                f"//*[@xml:id='{passage_id}']",
-                namespaces=XML_NS
-            )
+            el = xmlid_index.get(passage_id)
 
-            if not results:
+            if el is None:
                 raise IndexError("xml:id not found in TEI document")
-
-            el = results[0]
 
         except Exception as e:
             report_indexation_exception(
@@ -1011,7 +1055,8 @@ async def index_resource_passages_async(
             continue
 
         nav = nav_index.get(passage_id, {})
-        ancestors = get_ancestors(passage_id, nav_index)
+
+        ancestors = ancestor_cache.get(passage_id, [])
 
         document_passage = {
             "resource_id": resource_id,
@@ -1038,21 +1083,29 @@ async def index_resource_passages_async(
         app.index_stats["passages"] += 1
         report_passages_indexation(app, resource_id, passage_id)
 
-    # Ajout des passages dans un fichier JSONL unique par collection
+    # Add all passages by collection to a JSONL file
     if passages:
         collection_passages_jsonl_path = f"out/{collection_id}_passages.jsonl"
         with open(collection_passages_jsonl_path, 'a', encoding='utf-8') as f:
             for passage in passages:
                 f.write(json.dumps(passage) + '\n')
 
-    # Création du document de ressource
+    # Create Resource document object
     document = {
         "type": "Resource",
         "level": 0,
-        "resource_metadata": resource_metadata
+        "resource_metadata": resource_metadata,
+        "collections": [{
+                "collection_id": collection_metadata["id"],
+                "collection_title": collection_metadata["title"],
+                "path": collection_metadata["path"],
+                "path_ids": collection_metadata["path_ids"],
+                "level": collection_metadata["level"],
+                "dublincore": collection_metadata.get("dublincore", {}),
+            }]
     }
 
-    # Ajout du document dans un fichier JSONL unique par collection
+    # Add all Resources by collection to a JSONL file
     collection_documents_jsonl_path = f"out/{collection_id}_documents.jsonl"
     with open(collection_documents_jsonl_path, 'a', encoding='utf-8') as f:
         f.write(json.dumps(document) + '\n')
@@ -1079,7 +1132,12 @@ async def index_collection(app, collection_metadata):
         print(f"Collection indexed and added to {collection_jsonl_path}")
 
         # Update the stats for indexed collections
-        app.index_stats["collections"] += 1
+
+        if collection_metadata.get("id", "").lower() != app.config.get("TARGET_COLLECTION", "").lower():
+            if collection_metadata.get("parent_id", "").lower() == app.config.get("TARGET_COLLECTION", "").lower():
+                app.index_stats["projects"] += 1
+            else:
+                app.index_stats["collections"] += 1
 
     except Exception as e:
         print(f"⚠️ Error indexing collection {collection_id}: {e}")
@@ -1187,7 +1245,39 @@ async def build_parent_chain(app, collection_id: str, stop_at: str | None = None
 
     return [chain, chain_label]
 
-async def crawl_branch(app, chain: list[str], chain_label: list[str], collection_index: str, target_collections: set | None, visited: set, semaphore: asyncio.Semaphore, parent_id=None, parent_path=None, parent_path_ids=None,
+
+async def resource_worker(
+    queue: asyncio.Queue,
+    app,
+    client: httpx.AsyncClient,
+):
+    while True:
+
+        item = await queue.get()
+
+        if item is None:
+            queue.task_done()
+            break
+
+        try:
+            await index_resource_passages_async(
+                app=app,
+                resource_id=item["resource_id"],
+                collections=item["collections"],
+                resource_metadata=item["resource_metadata"],
+                client=client
+            )
+
+        except Exception as e:
+            print(
+                f"⚠️ Worker error on resource {item['resource_id']}: {e}"
+            )
+
+        finally:
+            queue.task_done()
+
+
+async def crawl_branch(app, chain: list[str], chain_label: list[str], collection_index: str, target_collections: set | None, visited: set, semaphore: asyncio.Semaphore, resource_queue: asyncio.Queue | None = None, parent_id=None, parent_path=None, parent_path_ids=None,
     in_target_branch=False):
     """
     Crawl a single branch of collections from root -> target.
@@ -1260,20 +1350,16 @@ async def crawl_branch(app, chain: list[str], chain_label: list[str], collection
                 member_chain_label = [member_chain_label]
                 print('recursive crawling member ', member_id)
                 if member_type == "Collection":
-                    # Always explore the branch for target collections
-                    #member_chain = [member_id]
+                    # Always (?) explore the branch for target collections
+
                     print("looping throught member_id", member_id + '\n')
-                    # if target_collections and member_id.lower() not in target_collections:
-                    #     # continue only if the member leads to a target
-                    #     parent_path = collection_metadata.get("path", [])
-                    #     parent_path_ids = collection_metadata.get("path_ids", [])
-                    #     print("parent_path", parent_path)
-                    #     print("parent_path_ids ", collection_metadata.get("path_ids", []) )
-                    #     if member_id.lower() not in parent_path_ids:
-                    #         print("member_id not in parent_path member_id", member_id.lower() + '\n')
-                    #         print("member_id not in parent_path parent_path_ids", parent_path_ids)
-                    #         continue
-                    # Pass updated path_ids to child collection
+
+                    # ── Exclusion explicite : coupe la branche sans requête HTTP ──
+                    if member_id.lower() in app.excluded_collections:
+                        print(f"Skipping excluded collection member: {member_id}")
+                        app.index_stats["excluded_collections"] = app.index_stats.get("excluded_collections", 0) + 1
+                        continue
+
                     print('crawled member : ', member)
                     await crawl_branch(
                         app=app,
@@ -1283,6 +1369,7 @@ async def crawl_branch(app, chain: list[str], chain_label: list[str], collection
                         target_collections=target_collections,
                         visited=visited,
                         semaphore=semaphore,
+                        resource_queue=resource_queue,
                         parent_id=collection_es_id,
                         parent_path=collection_metadata.get("path"),
                         parent_path_ids=collection_metadata.get("path_ids"),
@@ -1298,14 +1385,25 @@ async def crawl_branch(app, chain: list[str], chain_label: list[str], collection
                             parent_path=collection_metadata.get("path"),
                             parent_path_ids=collection_metadata.get("path_ids")
                         )
-                        await index_resource_passages_async(
-                            app=app,
-                            resource_id=member_id,
-                            collections=[collection_metadata],
-                            resource_metadata=resource_metadata
-                        )
 
+                        if resource_queue is not None:
 
+                            await resource_queue.put(
+                                {
+                                    "resource_id": member_id,
+                                    "collections": [collection_metadata],
+                                    "resource_metadata": resource_metadata
+                                }
+                            )
+
+                        else:
+
+                            await index_resource_passages_async(
+                                app=app,
+                                resource_id=member_id,
+                                collections=[collection_metadata],
+                                resource_metadata=resource_metadata
+                            )
 
 async def crawl_collection(app, collection_id: str, collection_index: str, target_collections: set | None = None, parent_id=None, parent_path=None, parent_path_ids=None):
     """
@@ -1314,6 +1412,37 @@ async def crawl_collection(app, collection_id: str, collection_index: str, targe
     """
     semaphore = asyncio.Semaphore(app.config.get("MAX_CONCURRENT_REQUESTS", 5))
     visited = set()
+
+    resource_queue = asyncio.Queue(maxsize=200)
+
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(
+            connect=10.0,
+            read=120.0,
+            write=30.0,
+            pool=30.0
+        ),
+        limits=httpx.Limits(
+            max_connections=10,
+            max_keepalive_connections=10
+        )
+    )
+
+    RESOURCE_WORKERS = app.config.get(
+        "RESOURCE_WORKERS",
+        5
+    )
+
+    workers = [
+        asyncio.create_task(
+            resource_worker(
+                queue=resource_queue,
+                app=app,
+                client=client
+            )
+        )
+        for _ in range(RESOURCE_WORKERS)
+    ]
 
     root_collection_id = app.config['TARGET_COLLECTION']
     root_collection_name = app.config['TARGET_COLLECTION_NAME']
@@ -1330,8 +1459,18 @@ async def crawl_collection(app, collection_id: str, collection_index: str, targe
             print('crawl_collection debug chain_label', chain_label)
             parent_id = chain[-2]
             print('crawl_collection debug parent_id', parent_id)
-            tasks.append(crawl_branch(app, chain, chain_label, collection_index, target_collections, visited, semaphore, parent_id, parent_path, parent_path_ids))
+            tasks.append(crawl_branch(app, chain, chain_label, collection_index, target_collections, visited, semaphore, resource_queue, parent_id, parent_path, parent_path_ids))
         await asyncio.gather(*tasks)
+
+        await resource_queue.join()
+
+        for _ in workers:
+            await resource_queue.put(None)
+
+        await asyncio.gather(*workers)
+
+        await client.aclose()
+
     else:
         # Full tree crawl
         await crawl_branch(
@@ -1342,6 +1481,7 @@ async def crawl_collection(app, collection_id: str, collection_index: str, targe
             target_collections=None,
             visited=visited,
             semaphore=semaphore,
+            resource_queue=resource_queue,
             parent_id=root_collection_id,
             parent_path=None,
             parent_path_ids=None
@@ -1405,6 +1545,7 @@ async def dotsplorer(app, collections, _index_name):
         app.index_stats = {
             "projects": 0,  # collections sans parent
             "collections": 0,  # collections avec parent
+            "excluded_collections": 0, # collections exclues
             "resources": 0,
             "passages": 0,
             "bulk_es_errors": 0
@@ -1472,6 +1613,7 @@ async def dotsplorer(app, collections, _index_name):
         print(f"📁  Sous-collections             : {stats['collections']}")
         print(f"📄  Resources crawlées           : {stats['resources']}")
         print(f"🧩  Passages crawlées            : {stats['passages']}")
+        print(f"📁  Collections exclues          : {stats['excluded_collections']}")
         print("────────────────────────")
         print(f"📄  Passages en erreur           : {doc_errors}")
         print(f"📄  Passages sans texte          : {doc_no_text}")
@@ -1640,7 +1782,7 @@ def make_cli():
         all_files = [f for f in os.listdir(out_dir) if f.endswith(".jsonl")]
 
         # -----------------------------
-        # 1️⃣ Indexer les passages
+        # 1 Indexer les passages
         # -----------------------------
         start_fragments_indexation = time.perf_counter()
 
@@ -1708,7 +1850,7 @@ def make_cli():
         end_fragments_indexation = time.perf_counter()
 
         # -----------------------------
-        # 2️⃣ Indexer les documents
+        # 2 Indexer les documents
         # -----------------------------
         start_documents_indexation = time.perf_counter()
 
@@ -1731,7 +1873,7 @@ def make_cli():
         end_documents_indexation = time.perf_counter()
 
         # -----------------------------
-        # 3️⃣ Indexer les collections
+        # 3 Indexer les collections
         # -----------------------------
         start_collections_indexation = time.perf_counter()
 
