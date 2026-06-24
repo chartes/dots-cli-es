@@ -154,12 +154,13 @@ def register_search_endpoint(
         groupby_after: str = request.args.get("groupby[after-page]", None)
         groupby_with_ids: int = request.args.get("groupby[with-ids]", 10000) or 10000
         collection_id: str = request.args.get("collectionId")
+        collection_facet = request.args.get("collection_facet")
 
         no_highlight = isinstance(request.args.get("no-highlight", False), str)
 
         # Pagination
         num_page = int(request.args.get('page[number]', 1))
-        page_size = max(int(request.args.get('page[size]', current_app.config["SEARCH_RESULT_PER_PAGE"])), 200)
+        page_size = max(int(request.args.get('page[size]', current_app.config["SEARCH_RESULT_PER_PAGE"])), 10)
 
         # Tri
         sort_criteriae: list[dict] = []
@@ -178,6 +179,7 @@ def register_search_endpoint(
 
             # === CAS 1 : Recherche simple sur ressources filtrée par collection ===
             if not query_param and collection_id:
+                print('\nsearch CAS 1')
                 body_query = {
                     "query": {
                         "bool": {
@@ -194,10 +196,45 @@ def register_search_endpoint(
                     "sort": sort_criteriae,
                     "from": (num_page - 1) * page_size,
                     "size": page_size,
-                    "track_total_hits": True
+                    "track_total_hits": True,
+                    "aggregations": {
+                        "collections_fac": {
+                            "terms": {
+                                "field": "collection_facets",
+                                "size": 100000
+                            }
+                        }
+                    }
                 }
+                if collection_facet:
+                    body_query["query"]["bool"].setdefault("filter", []).append({
+                        "term": {
+                            "collection_facets": collection_facet
+                        }
+                    })
 
                 search_result = current_app.elasticsearch.search(index=index, body=body_query)
+                print('\nbody_query')
+                print(body_query)
+
+
+                print('\nsearch_result["aggregations"]')
+                print(search_result["aggregations"])
+                collection_facets = []
+
+                for bucket in search_result["aggregations"]["collections_fac"]["buckets"]:
+                    try:
+                        coll_id, label = bucket["key"].split("###", 1)
+                    except ValueError:
+                        coll_id = bucket["key"]
+                        label = bucket["key"]
+
+                    collection_facets.append({
+                        "id": coll_id,
+                        "label": label,
+                        "count": bucket["doc_count"],
+                        "facet_key": bucket["key"]
+                    })
 
                 results = [
                     {
@@ -212,14 +249,22 @@ def register_search_endpoint(
 
                 r = {
                     "data": results,
-                    "total_count": search_result["hits"]["total"]["value"]
+                    "total_count": search_result["hits"]["total"]["value"],
+                    "facets": {
+                        "collections": collection_facets
+                    }
                 }
 
             # === CAS 2 : Recherche groupée par resource (hits + highlights dans la même requête) ===
             elif groupby_field:
+                print('\nsearch CAS 2')
                 # Corps principal de la requête
                 body_query = {
-                    "query": {"bool": {"must": []}},
+                    "query": {
+                        "bool": {
+                            "must": [{"match_all": {}}]
+                        }
+                    },
                     "sort": sort_criteriae,
                     "track_total_hits": True,
                     "track_scores": True,
@@ -245,7 +290,13 @@ def register_search_endpoint(
                             }
                         },
                         "bucket_count": {"cardinality": {"field": groupby_field}},
-                    }
+                        "collections": {
+                            "terms": {
+                                "field": "collection_facets",
+                                "size": 1000
+                            }
+                        }
+                    },
                 }
 
                 # Ajouter la clause full-text
@@ -263,6 +314,13 @@ def register_search_endpoint(
                     es_filters = parse_filters_param(filters_param)
                     if es_filters:
                         body_query["query"]["bool"].setdefault("filter", []).extend(es_filters)
+
+                if collection_facet:
+                    body_query["query"]["bool"].setdefault("filter", []).append({
+                        "term": {
+                            "collection_facets": collection_facet
+                        }
+                    })
 
                 # Pagination après pour composite
                 if groupby_after:
@@ -293,6 +351,29 @@ def register_search_endpoint(
                 buckets = search_result["aggregations"]["resources"]["buckets"]
                 bucket_count = search_result["aggregations"]["bucket_count"]["value"]
                 after_key = search_result["aggregations"]["resources"].get("after_key", None)
+
+                collection_facets = []
+
+                for bucket in search_result["aggregations"]["collections"]["buckets"]:
+                    try:
+                        coll_id, label = bucket["key"].split("###", 1)
+                    except ValueError:
+                        coll_id = bucket["key"]
+                        label = bucket["key"]
+
+                    collection_facets.append({
+                        "id": coll_id,
+                        "label": label,
+                        "count": bucket["doc_count"],
+                        "facet_key": bucket["key"]
+                    })
+
+                if collection_facet:
+                    collection_facets = [
+                        f for f in collection_facets
+                        if f["facet_key"] != collection_facet
+                    ]
+
 
                 # Construire le résultat groupé directement depuis les hits
                 def add_ellipsis(fragment):
@@ -350,8 +431,19 @@ def register_search_endpoint(
                         ]
                     })
 
+                # r = {
+                #     "buckets": grouped_results,
+                #     "after_key": after_key,
+                #     "bucket_count": bucket_count,
+                #     "total_count": search_result["hits"]["total"]["value"]
+                # }
                 r = {
                     "buckets": grouped_results,
+
+                    "facets": {
+                        "collections": collection_facets
+                    },
+
                     "after_key": after_key,
                     "bucket_count": bucket_count,
                     "total_count": search_result["hits"]["total"]["value"]
@@ -359,11 +451,24 @@ def register_search_endpoint(
 
             # === CAS 3 : Recherche classique avec query_param ===
             else:
+                print('\nsearch CAS 3')
                 body_query = {
-                    "query": {"bool": {"must": []}},
+                    "query": {
+                        "bool": {
+                            "must": [{"match_all": {}}]
+                        }
+                    },
                     "sort": sort_criteriae,
                     "track_total_hits": True,
                     "track_scores": True,
+                    "aggregations": {
+                        "collections": {
+                            "terms": {
+                                "field": "collection_facets",
+                                "size": 1000
+                            }
+                        }
+                    }
                 }
 
                 # Toujours filtrer type=Resource si collection_id fourni
@@ -386,13 +491,41 @@ def register_search_endpoint(
                 body_query["from"] = (num_page - 1) * page_size
                 body_query["size"] = page_size
 
+                print('\nbody_query')
+                print(body_query)
                 search_result = current_app.elasticsearch.search(index=index, body=body_query)
                 results = compose_result_func(search_result)
 
+                collection_facets = []
+
+                print('\nsearch_result["aggregations"]')
+                print(search_result["aggregations"])
+                for bucket in search_result["aggregations"]["collections"]["buckets"]:
+                    try:
+                        coll_id, label = bucket["key"].split("###", 1)
+                    except:
+                        coll_id = bucket["key"]
+                        label = bucket["key"]
+
+                    collection_facets.append({
+                        "id": coll_id,
+                        "label": label,
+                        "count": bucket["doc_count"],
+                        "facet_key": bucket["key"]
+                    })
+
                 r = {
                     "data": results,
+                    "facets": {
+                        "collections": collection_facets
+                    },
                     "total_count": search_result["hits"]["total"]["value"]
                 }
+
+                # r = {
+                #     "data": results,
+                #     "total_count": search_result["hits"]["total"]["value"]
+                # }
 
             r["duration"] = float('%.4f' % (time.time() - start_time))
 

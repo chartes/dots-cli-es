@@ -71,6 +71,9 @@
           }
         }
       },
+      "collection_facets": {
+        "type": "keyword"
+      },
       "resource_metadata": {
         "type": "object",
         "dynamic": true

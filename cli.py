@@ -995,6 +995,9 @@ async def index_resource_passages_async(
                     "level": collection_metadata["level"],
                     "dublincore": collection_metadata.get("dublincore", {}),
                 }],
+                "collection_facets": [
+                    f'{collection_metadata["id"]}###{collection_metadata["title"]}'
+                ],
                 "resource_metadata": resource_metadata
             }
 
@@ -1076,6 +1079,9 @@ async def index_resource_passages_async(
                 "level": collection_metadata["level"],
                 "dublincore": collection_metadata.get("dublincore", {}),
             }],
+            "collection_facets": [
+                f'{collection_metadata["id"]}###{collection_metadata["title"]}'
+            ],
             "resource_metadata": resource_metadata
         }
 
@@ -1102,7 +1108,10 @@ async def index_resource_passages_async(
                 "path_ids": collection_metadata["path_ids"],
                 "level": collection_metadata["level"],
                 "dublincore": collection_metadata.get("dublincore", {}),
-            }]
+            }],
+        "collection_facets": [
+            f'{collection_metadata["id"]}###{collection_metadata["title"]}'
+        ]
     }
 
     # Add all Resources by collection to a JSONL file
