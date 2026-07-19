@@ -11,9 +11,9 @@
 # -------------------------------------------------------------------
 source:
   DTS_URL: "https://dev.chartes.psl.eu/dots/api/dts"  # Base URL of the source API http://localhost:8080/api/dts
-  TARGET_COLLECTION: "ENCPOS"  # Identifiant de la collection racine à explorer empty by default
+  TARGET_COLLECTION: "cartulaires"  # Identifiant de la collection racine à explorer empty by default
   CUSTOM_SETTINGS_PATH: !!str ${CUSTOM_SETTINGS_PATH}
-  ADDITIONAL_EXCLUDED_COLLECTIONS: [ corpus, bfm, cid, cartulaires, racine, theater, encpos_2, CLEM, cjc, formulaires, dubourg, miroir, comptes, obituaires, sanctoral_elec ]
+  ADDITIONAL_EXCLUDED_COLLECTIONS: [ corpus, bfm, cid, racine, theater, cjc, ENCPOS, encpos_2, CLEM, formulaires, dubourg, miroir, comptes, obituaires, sanctoral_elec ]
 
 # -------------------------------------------------------------------
 # Configuration du moteur de recherche ES

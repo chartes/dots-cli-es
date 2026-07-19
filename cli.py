@@ -14,6 +14,8 @@ import yaml
 from elasticsearch import Elasticsearch
 from lxml import etree
 
+from api.search_fields import SEARCH_FIELDS, SearchFieldFamily, build_filtered_temporal_metadata
+
 
 # ============================================================
 # SIMPLE APP OBJECT
@@ -677,6 +679,49 @@ def get_ancestors(passage_id: str, nav_index: dict) -> list:
 
     return ancestors
 
+def build_ancestor_cache_from_fragments(fragments: list[dict]) -> dict:
+    cache = {}
+
+    fragment_by_id = {
+        f.get("id"): f
+        for f in fragments
+        if f.get("id")
+    }
+
+    def compute(pid):
+        if pid in cache:
+            return cache[pid]
+
+        node = fragment_by_id.get(pid)
+        if not node:
+            cache[pid] = []
+            return []
+
+        parent_id = node.get("parent")
+        if not parent_id:
+            cache[pid] = []
+            return []
+
+        parent = fragment_by_id.get(parent_id)
+        if not parent:
+            cache[pid] = []
+            return []
+
+        ancestors = compute(parent_id) + [{
+            "id": parent.get("id"),
+            "level": parent.get("level"),
+            "citeType": parent.get("citeType"),
+            "title": parent.get("head") or parent.get("title")
+        }]
+
+        cache[pid] = ancestors
+        return ancestors
+
+    for pid in fragment_by_id:
+        compute(pid)
+
+    return cache
+
 async def build_navigation_index(app, dts_url: str, resource_id: str, client: httpx.AsyncClient = None) -> dict[Any, Any] | None:
     data = None
     own_client = False
@@ -812,20 +857,110 @@ def extract_resource_metadata(resource_meta_response: dict) -> dict:
 
     return metadata
 
-def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids=None):
-    title = response.get("title") or response.get("@id")
-    #print('extract metadata \n')
-    #pprint.pprint(response)
-    path = title if not parent_path else f"{parent_path} > {title}"
-    path_ids = [response.get("@id")] if not parent_path_ids else parent_path_ids + [response.get("@id")]
+
+def allowed_metadata_paths():
+    """
+    Retourne les chemins DTS autorisés dans resource_metadata.
+
+    Les chemins viennent exclusivement du contrat SearchField.
+    """
+
+    return {
+        field.path
+        for field in SEARCH_FIELDS
+        if field.index
+    }
+
+def filter_resource_metadata(
+    resource_metadata: dict
+) -> dict:
+    """
+    Filtre resource_metadata selon SearchField.
+
+    Une métadonnée DTS absente de SEARCH_FIELDS
+    est supprimée.
+
+    Exemple :
+
+    conservé :
+        dublincore.creator
+
+    supprimé :
+        extensions.creditText
+        extensions.@context
+    """
+
+    allowed = allowed_metadata_paths()
+
+    filtered = {}
+
+    for field_path in allowed:
+
+        value = get_value(
+            resource_metadata,
+            SearchField(
+                path=field_path
+            )
+        )
+
+        if value is None:
+            continue
+
+        target = filtered
+
+        parts = field_path.split(".")
+
+        for part in parts[:-1]:
+            target = target.setdefault(
+                part,
+                {}
+            )
+
+        target[parts[-1]] = value
+
+    return filtered
+
+
+def extract_metadata(
+    response,
+    parent_id=None,
+    parent_path=None,
+    parent_path_ids=None
+):
+    """
+    Extrait les métadonnées d'une ressource DTS.
+
+    Le résultat est le bloc resource_metadata.
+    Il contient uniquement les métadonnées sources autorisées
+    par SEARCH_FIELDS.
+    """
+
+    obj_id = response.get("@id") or response.get("id")
+
+    title = response.get("title") or obj_id
+
+    path = (
+        title
+        if not parent_path
+        else f"{parent_path} > {title}"
+    )
+
+    path_ids = (
+        [obj_id]
+        if not parent_path_ids
+        else parent_path_ids + [obj_id]
+    )
+
 
     metadata = {
-        "id": response.get("@id"),
+        "id": obj_id,
         "type": response.get("@type"),
+
         "title": title,
         "description": response.get("description"),
 
         "parent_id": parent_id,
+
         "path": path,
         "path_ids": path_ids,
         "level": len(path_ids) - 1,
@@ -835,63 +970,262 @@ def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids
         "totalChildren": response.get("totalChildren"),
         "totalParents": response.get("totalParents"),
 
-        "download": response.get("download")
+        "download": response.get("download"),
     }
 
-    # Add Dublin Core:
+
+    # ==========================================================
+    # Allowed metadata fields from SearchField contract
+    # ==========================================================
+
+    allowed_dct_fields = {
+        field.path.removeprefix("dublincore.")
+        for field in SEARCH_FIELDS
+        if field.family == SearchFieldFamily.DCT
+        and field.path.startswith("dublincore.")
+    }
+
+
+    allowed_schema_fields = {
+        field.path.removeprefix("extensions.")
+        for field in SEARCH_FIELDS
+        if field.family == SearchFieldFamily.SCHEMA
+        and field.path.startswith("extensions.")
+    }
+
+
+    # ==========================================================
+    # Dublin Core
+    # ==========================================================
+
     dublincore = {}
-    dc = response.get("dublinCore", {})
+
+    dc = (
+        response
+        .get("metadata", {})
+        .get("dublincore", {})
+    )
 
     if isinstance(dc, dict):
+
         for key, value in dc.items():
-            normalized = normalize_metadata_value(value)
+
+            if key not in allowed_dct_fields:
+                continue
+
+            normalized = normalize_metadata_value(
+                value
+            )
+
             if normalized is None:
                 continue
+
             dublincore[key] = normalized
+
 
     metadata["dublincore"] = dublincore
 
-    # Add extensions:
+
+    # ==========================================================
+    # Schema extensions
+    # ==========================================================
+
     extensions = {}
 
-    ext = response.get("extensions", {})
+    ext = (
+        response
+        .get("metadata", {})
+        .get("extensions", {})
+    )
+
     if isinstance(ext, dict):
+
         for key, value in ext.items():
-            normalized = normalize_metadata_value(value)
+
+            if key not in allowed_schema_fields:
+                continue
+
+            normalized = normalize_metadata_value(
+                value
+            )
+
             if normalized is None:
                 continue
+
             extensions[key] = normalized
+
 
     metadata["extensions"] = extensions
 
-    # Add members:
+
+    # ==========================================================
+    # Members
+    # ==========================================================
+
     members = {}
-    mbers = response.get("member", [])
-    if isinstance(mbers, dict):
-        for key, value in dc.items():
-            if value is None:
+
+    raw_members = response.get("member", [])
+
+    if isinstance(raw_members, list):
+
+        for member in raw_members:
+
+            if not isinstance(member, dict):
                 continue
 
-            # transform to a string if this is a dict or a list
-            if isinstance(value, dict):
-                # for example, only use label/id if they exist
-                value = value.get("label") or value.get("@id") or str(value)
-            elif isinstance(value, list):
-                normalized = []
-                for v in value:
-                    if isinstance(v, dict):
-                        normalized.append(
-                            v.get("label") or v.get("@id") or str(v)
-                        )
-                    else:
-                        normalized.append(str(v))
-                value = ", ".join(normalized)
-            elif not isinstance(value, str):
-                value = str(value)
-            members[key] = value
+            member_id = (
+                member.get("@id")
+                or member.get("id")
+            )
+
+            member_title = (
+                member.get("title")
+                or member_id
+            )
+
+            if member_id:
+                members[member_id] = member_title
+
+
     metadata["members"] = members
 
+
+    # ==========================================================
+    # Fragments
+    # ==========================================================
+
+    metadata["fragments"] = response.get(
+        "fragments",
+        []
+    )
+
+
     return metadata
+
+#10juillet def extract_metadata(response, parent_id=None, parent_path=None, parent_path_ids=None):
+#     obj_id = response.get("@id") or response.get("id")
+#     title = response.get("title") or obj_id
+#     #print('extract metadata \n')
+#     #pprint.pprint(response)
+#     path = title if not parent_path else f"{parent_path} > {title}"
+#     path_ids = [obj_id] if not parent_path_ids else parent_path_ids + [obj_id]
+#
+#     metadata = {
+#         "id": obj_id,
+#         "type": response.get("@type"),
+#         "title": title,
+#         "description": response.get("description"),
+#
+#         "parent_id": parent_id,
+#         "path": path,
+#         "path_ids": path_ids,
+#         "level": len(path_ids) - 1,
+#
+#         "dtsVersion": response.get("dtsVersion"),
+#         "totalItems": response.get("totalItems"),
+#         "totalChildren": response.get("totalChildren"),
+#         "totalParents": response.get("totalParents"),
+#
+#         "download": response.get("download")
+#     }
+#
+#     # Add Dublin Core:
+#     dublincore = {}
+#     dc = response.get("metadata", {}).get("dublincore", {})
+#
+#     if isinstance(dc, dict):
+#         for key, value in dc.items():
+#             normalized = normalize_metadata_value(value)
+#             if normalized is None:
+#                 continue
+#             dublincore[key] = normalized
+#
+#     metadata["dublincore"] = dublincore
+#
+#     # Add extensions:
+#     extensions = {}
+#
+#     ext = response.get("metadata", {}).get("extensions", {})
+#     if isinstance(ext, dict):
+#         for key, value in ext.items():
+#             normalized = normalize_metadata_value(value)
+#             if normalized is None:
+#                 continue
+#             extensions[key] = normalized
+#
+#     metadata["extensions"] = extensions
+#
+#     # Add members:
+#     members = {}
+#     mbers = response.get("member", [])
+#     if isinstance(mbers, dict):
+#         for key, value in dc.items():
+#             if value is None:
+#                 continue
+#
+#             # transform to a string if this is a dict or a list
+#             if isinstance(value, dict):
+#                 # for example, only use label/id if they exist
+#                 value = value.get("label") or value.get("@id") or str(value)
+#             elif isinstance(value, list):
+#                 normalized = []
+#                 for v in value:
+#                     if isinstance(v, dict):
+#                         normalized.append(
+#                             v.get("label") or v.get("@id") or str(v)
+#                         )
+#                     else:
+#                         normalized.append(str(v))
+#                 value = ", ".join(normalized)
+#             elif not isinstance(value, str):
+#                 value = str(value)
+#             members[key] = value
+#     metadata["members"] = members
+#     metadata["fragments"] = response.get("fragments", [])
+#
+#     return metadata
+
+def sanitize_resource_metadata(
+    resource_metadata: dict
+):
+    """
+    Supprime uniquement les données lourdes
+    non destinées au document ES.
+    """
+
+    cleaned = dict(resource_metadata)
+
+    cleaned.pop(
+        "fragments",
+        None
+    )
+
+    cleaned.pop(
+        "members",
+        None
+    )
+
+    return cleaned
+
+#10juillet def sanitize_resource_metadata(resource_metadata: dict) -> dict:
+#     """
+#     Return a clean copy of resource_metadata without heavy/internal fields.
+#     """
+#     cleaned = dict(resource_metadata)
+#     cleaned.pop("fragments", None)  # 👈 suppression clé
+#     return cleaned
+
+def build_collection_facets(collection_metadata):
+    path_ids = collection_metadata.get("path_ids") or []
+    path = collection_metadata.get("path") or ""
+
+    labels = [p.strip() for p in path.split(" > ") if p.strip()]
+
+    return [
+        f"{cid}###{label}"
+        for cid, label in zip(path_ids, labels)
+    ]
+
 
 async def index_resource_passages_async(
     app,
@@ -901,91 +1235,49 @@ async def index_resource_passages_async(
     client: httpx.AsyncClient = None
 ):
     """
-    Index passages of a DTS resource asynchronously using httpx.AsyncClient.
-    All original logic and comments are preserved.
+    Index passages of a DTS resource using pre-normalized fragments only.
+    No TEI parsing, no navigation index: everything comes from resource_metadata["fragments"].
     """
+
     collection_metadata = collections[0]
-
     collection_id = collection_metadata["id"]
-    dts_url = app.config["DTS_URL"]
-    print('index_resource_passages', resource_id)
-    print('index used for resource indexation', app.config["DOCUMENT_INDEX"])
 
-    # Async fetch navigation index
-    nav_index = await build_navigation_index(app, dts_url, resource_id, client=client)
+    print("index_resource_passages (fragments mode)", resource_id)
+    print("index used for resource indexation", app.config["DOCUMENT_INDEX"])
 
-    if nav_index is None:
-        return  # there was an error getting the navigation : we skip the document and go to the next one
+    fragments = resource_metadata.get("fragments") or []
 
-    ancestor_cache = build_ancestor_cache(nav_index)
+    #10juillet temporal = getattr(app, "thunderdots_temporal", {}).get(resource_id, {})
 
+    resource_temporal = getattr(app, "thunderdots_temporal", {}).get(resource_id, {})
+    temporal = build_filtered_temporal_metadata(resource_temporal)
 
     async_client_provided = client is not None
-    client = client or httpx.AsyncClient()  # Shared async client for connection pooling
+    client = client or httpx.AsyncClient()
 
-    # Fetch TEI document asynchronously
-    try:
-        xml_response = await client.get(
-            f"{dts_url}/document",
-            params={"resource": resource_id}
-        )
-        xml_response.raise_for_status()
-    except Exception as e:
-        report_indexation_exception(
-            app=app,
-            resource_id=resource_id,
-            passage_id="__fulltext__",
-            error=e,
-            context="index_resource_passages_document_fetch"
-        )
-        if not async_client_provided:
-            await client.aclose()
-        return
-
-    parser = etree.XMLParser(collect_ids=False)
-    start = time.perf_counter()
-    root = etree.XML(xml_response.content, parser)  # type: ignore
-    XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
-
-    wanted_ids = set(nav_index.keys())
-
-    xmlid_index = {}
-
-    for elem in root.iter():
-        xml_id = elem.get(XML_ID)
-
-        if xml_id in wanted_ids:
-            xmlid_index[xml_id] = elem
-
-            if len(xmlid_index) == len(wanted_ids):
-                break
-    print("XML parse took", time.perf_counter() - start)
-    # Initialise list to store passages to add to JSONL file
     passages = []
-    document = None
 
-    # FALLBACK : no DTS fragments for the resource → index all <text>
-    if not nav_index:
+    # ---------------------------------------------------------------------
+    # Ancestor cache (NEW LOGIC)
+    # ---------------------------------------------------------------------
+    ancestor_cache = build_ancestor_cache_from_fragments(fragments)
+
+    # ---------------------------------------------------------------------
+    # FALLBACK: no fragments → single fulltext passage
+    # ---------------------------------------------------------------------
+    if not fragments:
         try:
-            text_nodes = root.xpath("//tei:text", namespaces=XML_NS)
-            if not text_nodes:
-                raise ValueError("No <tei:text> found in TEI document")
-
-            full_text = normalize_text(
-                extract_passage_text(text_nodes[0], nav_index={})
-            )
-
-            if not full_text:
-                raise ValueError("Empty fulltext extracted")
-
             document_passage = {
                 "resource_id": resource_id,
                 "passage_id": "__fulltext__",
+                "type": "fragment",
                 "citeType": "text",
                 "level": 1,
-                "content": full_text,
-                "path": resource_metadata["path"],
-                "path_ids": resource_metadata["path_ids"],
+                "content": normalize_text(
+                    resource_metadata.get("metadata", {}).get("text", "")
+                ),
+                "path": resource_metadata.get("path"),
+                "path_ids": resource_metadata.get("path_ids"),
                 "ancestors": [],
                 "collections": [{
                     "collection_id": collection_metadata["id"],
@@ -995,18 +1287,18 @@ async def index_resource_passages_async(
                     "level": collection_metadata["level"],
                     "dublincore": collection_metadata.get("dublincore", {}),
                 }],
-                "collection_facets": [
-                    f'{collection_metadata["id"]}###{collection_metadata["title"]}'
-                ],
-                "resource_metadata": resource_metadata
+                "collection_facets": build_collection_facets(collection_metadata),
+                "resource_metadata": sanitize_resource_metadata(
+                    resource_metadata
+                ),
+                "temporal": temporal
+                #10juillet "resource_metadata": sanitize_resource_metadata(resource_metadata),
             }
 
             passages.append(document_passage)
-
-            # Passages counter
             app.index_stats["passages"] += 1
 
-            report_passages_indexation(app, resource_id, '__fulltext__')
+            report_passages_indexation(app, resource_id, "__fulltext__")
 
         except Exception as e:
             report_indexation_exception(
@@ -1014,116 +1306,344 @@ async def index_resource_passages_async(
                 resource_id=resource_id,
                 passage_id="__fulltext__",
                 error=e,
-                context="index_resource_passages_fulltext_fallback"
+                context="index_resource_passages_fallback_no_fragments"
             )
 
-        # Skip main loop if no navigation index
-        nav_index = {}
-
-    # Verifying if nav_index actually exist in TEI
-    for passage_id in nav_index:
+    # ---------------------------------------------------------------------
+    # MAIN LOOP: fragments → passages
+    # ---------------------------------------------------------------------
+    for fragment in fragments:
         try:
-            el = xmlid_index.get(passage_id)
+            passage_id = fragment.get("id")
+            if not passage_id:
+                continue
 
-            if el is None:
-                raise IndexError("xml:id not found in TEI document")
+            text = normalize_text(fragment.get("content") or fragment.get("head") or "")
+            if not text:
+                report_no_text_passage(
+                    app=app,
+                    resource_id=resource_id,
+                    passage_id=passage_id,
+                    nav=fragment
+                )
+                continue
+
+            ancestors = ancestor_cache.get(passage_id, [])
+
+            document_passage = {
+                "resource_id": resource_id,
+                "passage_id": passage_id,
+                "type": "fragment",
+                "citeType": fragment.get("citeType"),
+                "level": fragment.get("level"),
+                "title": fragment.get("head"),
+                "content": text,
+                "path": resource_metadata.get("path"),
+                "path_ids": resource_metadata.get("path_ids"),
+                "ancestors": ancestors,
+                "collections": [{
+                    "collection_id": collection_metadata["id"],
+                    "collection_title": collection_metadata["title"],
+                    "path": collection_metadata["path"],
+                    "path_ids": collection_metadata["path_ids"],
+                    "level": collection_metadata["level"],
+                    "dublincore": collection_metadata.get("dublincore", {}),
+                }],
+                "collection_facets": build_collection_facets(collection_metadata),
+                "resource_metadata": sanitize_resource_metadata(
+                    resource_metadata
+                ),
+                #10juillet "resource_metadata": sanitize_resource_metadata(resource_metadata),
+                "temporal": temporal
+            }
+
+            passages.append(document_passage)
+            app.index_stats["passages"] += 1
+
+            report_passages_indexation(app, resource_id, passage_id)
 
         except Exception as e:
             report_indexation_exception(
                 app=app,
                 resource_id=resource_id,
-                passage_id=passage_id,
+                passage_id=fragment.get("id"),
                 error=e,
-                context="index_resource_passages"
+                context="index_resource_passages_fragment_loop"
             )
-            print(
-                f"⚠️ Passage {passage_id} absent du TEI "
-                f"(resource {resource_id}) → loggé"
-            )
-            continue
 
-        if not isinstance(el, etree._Element):
-            print("⚠️ Skipping non-element", el)
-            continue
-
-        text = normalize_text(extract_passage_text(el, nav_index=nav_index))
-
-        if not text:
-            report_no_text_passage(
-                app=app,
-                resource_id=resource_id,
-                passage_id=passage_id,
-                nav=nav_index.get(passage_id, {})
-            )
-            continue
-
-        nav = nav_index.get(passage_id, {})
-
-        ancestors = ancestor_cache.get(passage_id, [])
-
-        document_passage = {
-            "resource_id": resource_id,
-            "passage_id": passage_id,
-            "citeType": nav.get("citeType"),
-            "level": nav.get("level"),
-            "title": nav.get("title"),
-            "content": text,
-            "path": resource_metadata["path"],
-            "path_ids": resource_metadata["path_ids"],
-            "ancestors": ancestors,
-            "collections": [{
-                "collection_id": collection_metadata["id"],
-                "collection_title": collection_metadata["title"],
-                "path": collection_metadata["path"],
-                "path_ids": collection_metadata["path_ids"],
-                "level": collection_metadata["level"],
-                "dublincore": collection_metadata.get("dublincore", {}),
-            }],
-            "collection_facets": [
-                f'{collection_metadata["id"]}###{collection_metadata["title"]}'
-            ],
-            "resource_metadata": resource_metadata
-        }
-
-        passages.append(document_passage)
-        app.index_stats["passages"] += 1
-        report_passages_indexation(app, resource_id, passage_id)
-
-    # Add all passages by collection to a JSONL file
+    # ---------------------------------------------------------------------
+    # WRITE PASSAGES JSONL
+    # ---------------------------------------------------------------------
     if passages:
         collection_passages_jsonl_path = f"out/{collection_id}_passages.jsonl"
-        with open(collection_passages_jsonl_path, 'a', encoding='utf-8') as f:
+        with open(collection_passages_jsonl_path, "a", encoding="utf-8") as f:
             for passage in passages:
-                f.write(json.dumps(passage) + '\n')
+                f.write(json.dumps(passage, ensure_ascii=False) + "\n")
 
-    # Create Resource document object
+    # ---------------------------------------------------------------------
+    # RESOURCE DOCUMENT JSONL
+    # ---------------------------------------------------------------------
     document = {
+        "resource_id": resource_id,
         "type": "Resource",
         "level": 0,
-        "resource_metadata": resource_metadata,
+        "resource_metadata": sanitize_resource_metadata(
+                    resource_metadata
+                ),
+                #10juillet "resource_metadata": sanitize_resource_metadata(resource_metadata),
+        "temporal": temporal,
         "collections": [{
-                "collection_id": collection_metadata["id"],
-                "collection_title": collection_metadata["title"],
-                "path": collection_metadata["path"],
-                "path_ids": collection_metadata["path_ids"],
-                "level": collection_metadata["level"],
-                "dublincore": collection_metadata.get("dublincore", {}),
-            }],
-        "collection_facets": [
-            f'{collection_metadata["id"]}###{collection_metadata["title"]}'
-        ]
+            "collection_id": collection_metadata["id"],
+            "collection_title": collection_metadata["title"],
+            "path": collection_metadata["path"],
+            "path_ids": collection_metadata["path_ids"],
+            "level": collection_metadata["level"],
+            "dublincore": collection_metadata.get("dublincore", {}),
+        }],
+        "collection_facets": build_collection_facets(collection_metadata),
     }
 
-    # Add all Resources by collection to a JSONL file
     collection_documents_jsonl_path = f"out/{collection_id}_documents.jsonl"
-    with open(collection_documents_jsonl_path, 'a', encoding='utf-8') as f:
-        f.write(json.dumps(document) + '\n')
+    with open(collection_documents_jsonl_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(document, ensure_ascii=False) + "\n")
 
-    app.index_stats['resources'] += 1
+    app.index_stats["resources"] += 1
     print(f"Document de la ressource écrit dans {collection_documents_jsonl_path}")
 
     if not async_client_provided:
         await client.aclose()
+
+# async def index_resource_passages_async(
+#     app,
+#     resource_id: str,
+#     collections: list,
+#     resource_metadata: dict,
+#     client: httpx.AsyncClient = None
+# ):
+#     """
+#     Index passages of a DTS resource asynchronously using httpx.AsyncClient.
+#     All original logic and comments are preserved.
+#     """
+#     collection_metadata = collections[0]
+#
+#     collection_id = collection_metadata["id"]
+#     dts_url = app.config["DTS_URL"]
+#     print('index_resource_passages', resource_id)
+#     print('index used for resource indexation', app.config["DOCUMENT_INDEX"])
+#
+#     # Async fetch navigation index
+#     nav_index = await build_navigation_index(app, dts_url, resource_id, client=client)
+#
+#     if nav_index is None:
+#         return  # there was an error getting the navigation : we skip the document and go to the next one
+#
+#     ancestor_cache = build_ancestor_cache(nav_index)
+#
+#
+#     async_client_provided = client is not None
+#     client = client or httpx.AsyncClient()  # Shared async client for connection pooling
+#
+#     # Fetch TEI document asynchronously
+#     try:
+#         xml_response = await client.get(
+#             f"{dts_url}/document",
+#             params={"resource": resource_id}
+#         )
+#         xml_response.raise_for_status()
+#     except Exception as e:
+#         report_indexation_exception(
+#             app=app,
+#             resource_id=resource_id,
+#             passage_id="__fulltext__",
+#             error=e,
+#             context="index_resource_passages_document_fetch"
+#         )
+#         if not async_client_provided:
+#             await client.aclose()
+#         return
+#
+#     parser = etree.XMLParser(collect_ids=False)
+#     start = time.perf_counter()
+#     root = etree.XML(xml_response.content, parser)  # type: ignore
+#     XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
+#
+#     wanted_ids = set(nav_index.keys())
+#
+#     xmlid_index = {}
+#
+#     for elem in root.iter():
+#         xml_id = elem.get(XML_ID)
+#
+#         if xml_id in wanted_ids:
+#             xmlid_index[xml_id] = elem
+#
+#             if len(xmlid_index) == len(wanted_ids):
+#                 break
+#     print("XML parse took", time.perf_counter() - start)
+#     # Initialise list to store passages to add to JSONL file
+#     passages = []
+#     document = None
+#
+#     # FALLBACK : no DTS fragments for the resource → index all <text>
+#     if not nav_index:
+#         try:
+#             text_nodes = root.xpath("//tei:text", namespaces=XML_NS)
+#             if not text_nodes:
+#                 raise ValueError("No <tei:text> found in TEI document")
+#
+#             full_text = normalize_text(
+#                 extract_passage_text(text_nodes[0], nav_index={})
+#             )
+#
+#             if not full_text:
+#                 raise ValueError("Empty fulltext extracted")
+#
+#             document_passage = {
+#                 "resource_id": resource_id,
+#                 "passage_id": "__fulltext__",
+#                 "citeType": "text",
+#                 "level": 1,
+#                 "content": full_text,
+#                 "path": resource_metadata["path"],
+#                 "path_ids": resource_metadata["path_ids"],
+#                 "ancestors": [],
+#                 "collections": [{
+#                     "collection_id": collection_metadata["id"],
+#                     "collection_title": collection_metadata["title"],
+#                     "path": collection_metadata["path"],
+#                     "path_ids": collection_metadata["path_ids"],
+#                     "level": collection_metadata["level"],
+#                     "dublincore": collection_metadata.get("dublincore", {}),
+#                 }],
+#                 "collection_facets": [
+#                     f'{collection_metadata["id"]}###{collection_metadata["title"]}'
+#                 ],
+#                 "resource_metadata": resource_metadata
+#             }
+#
+#             passages.append(document_passage)
+#
+#             # Passages counter
+#             app.index_stats["passages"] += 1
+#
+#             report_passages_indexation(app, resource_id, '__fulltext__')
+#
+#         except Exception as e:
+#             report_indexation_exception(
+#                 app=app,
+#                 resource_id=resource_id,
+#                 passage_id="__fulltext__",
+#                 error=e,
+#                 context="index_resource_passages_fulltext_fallback"
+#             )
+#
+#         # Skip main loop if no navigation index
+#         nav_index = {}
+#
+#     # Verifying if nav_index actually exist in TEI
+#     for passage_id in nav_index:
+#         try:
+#             el = xmlid_index.get(passage_id)
+#
+#             if el is None:
+#                 raise IndexError("xml:id not found in TEI document")
+#
+#         except Exception as e:
+#             report_indexation_exception(
+#                 app=app,
+#                 resource_id=resource_id,
+#                 passage_id=passage_id,
+#                 error=e,
+#                 context="index_resource_passages"
+#             )
+#             print(
+#                 f"⚠️ Passage {passage_id} absent du TEI "
+#                 f"(resource {resource_id}) → loggé"
+#             )
+#             continue
+#
+#         if not isinstance(el, etree._Element):
+#             print("⚠️ Skipping non-element", el)
+#             continue
+#
+#         text = normalize_text(extract_passage_text(el, nav_index=nav_index))
+#
+#         if not text:
+#             report_no_text_passage(
+#                 app=app,
+#                 resource_id=resource_id,
+#                 passage_id=passage_id,
+#                 nav=nav_index.get(passage_id, {})
+#             )
+#             continue
+#
+#         nav = nav_index.get(passage_id, {})
+#
+#         ancestors = ancestor_cache.get(passage_id, [])
+#
+#         document_passage = {
+#             "resource_id": resource_id,
+#             "passage_id": passage_id,
+#             "citeType": nav.get("citeType"),
+#             "level": nav.get("level"),
+#             "title": nav.get("title"),
+#             "content": text,
+#             "path": resource_metadata["path"],
+#             "path_ids": resource_metadata["path_ids"],
+#             "ancestors": ancestors,
+#             "collections": [{
+#                 "collection_id": collection_metadata["id"],
+#                 "collection_title": collection_metadata["title"],
+#                 "path": collection_metadata["path"],
+#                 "path_ids": collection_metadata["path_ids"],
+#                 "level": collection_metadata["level"],
+#                 "dublincore": collection_metadata.get("dublincore", {}),
+#             }],
+#             "collection_facets": [
+#                 f'{collection_metadata["id"]}###{collection_metadata["title"]}'
+#             ],
+#             "resource_metadata": resource_metadata
+#         }
+#
+#         passages.append(document_passage)
+#         app.index_stats["passages"] += 1
+#         report_passages_indexation(app, resource_id, passage_id)
+#
+#     # Add all passages by collection to a JSONL file
+#     if passages:
+#         collection_passages_jsonl_path = f"out/{collection_id}_passages.jsonl"
+#         with open(collection_passages_jsonl_path, 'a', encoding='utf-8') as f:
+#             for passage in passages:
+#                 f.write(json.dumps(passage) + '\n')
+#
+#     # Create Resource document object
+#     document = {
+#         "type": "Resource",
+#         "level": 0,
+#         "resource_metadata": resource_metadata,
+#         "collections": [{
+#                 "collection_id": collection_metadata["id"],
+#                 "collection_title": collection_metadata["title"],
+#                 "path": collection_metadata["path"],
+#                 "path_ids": collection_metadata["path_ids"],
+#                 "level": collection_metadata["level"],
+#                 "dublincore": collection_metadata.get("dublincore", {}),
+#             }],
+#         "collection_facets": [
+#             f'{collection_metadata["id"]}###{collection_metadata["title"]}'
+#         ]
+#     }
+#
+#     # Add all Resources by collection to a JSONL file
+#     collection_documents_jsonl_path = f"out/{collection_id}_documents.jsonl"
+#     with open(collection_documents_jsonl_path, 'a', encoding='utf-8') as f:
+#         f.write(json.dumps(document) + '\n')
+#
+#     app.index_stats['resources'] += 1
+#     print(f"Document de la ressource écrit dans {collection_documents_jsonl_path}")
+#
+#     if not async_client_provided:
+#         await client.aclose()
 
 async def index_collection(app, collection_metadata):
     """
@@ -1286,14 +1806,244 @@ async def resource_worker(
             queue.task_done()
 
 
+# async def crawl_branch(app, chain: list[str], chain_label: list[str], collection_index: str, target_collections: set | None, visited: set, semaphore: asyncio.Semaphore, resource_queue: asyncio.Queue | None = None, parent_id=None, parent_path=None, parent_path_ids=None,
+#     in_target_branch=False):
+#     """
+#     Crawl a single branch of collections from root -> target.
+#     Only indexes collections in target_collections or non-excluded.
+#     """
+#     print('crawl_branch debug chain', chain)
+#     print('crawl_branch debug chain_label', chain_label)
+#     for collection_id in chain:
+#         collection_id_lc = collection_id.lower()
+#
+#         is_target = (
+#                 target_collections is not None
+#                 and collection_id_lc in {c.lower() for c in target_collections}
+#         )
+#
+#         in_target_branch = in_target_branch or is_target
+#         print('crawl_branch debug target_collections, is_target, in_target_branch', collection_id, collection_id_lc, target_collections,
+#               is_target, in_target_branch)
+#         async with semaphore:
+#             # Skip already visited collections
+#             if collection_id in visited:
+#                 continue
+#             visited.add(collection_id)
+#
+#             # Fetch collection details
+#             try:
+#                 data = await fetch_collection(app, collection_id)  # async helper
+#             except Exception as e:
+#                 print(f"⚠️ Impossible de récupérer la collection {collection_id}: {e}")
+#                 report_collection_exception(app, collection_id, e, context="crawl_branch_fetch")
+#                 continue
+#             print("data for collection_id", collection_id + '\n')
+#
+#             if not data or data.get("@type") != "Collection":
+#                 continue
+#
+#             # Decide whether to index this collection
+#             index_current = (
+#                 collection_id_lc not in app.excluded_collections
+#                 and (target_collections is None or in_target_branch)
+#             )
+#             print('index_current test ', collection_id_lc not in app.excluded_collections)
+#             print('index_current test 2 ', target_collections is None)
+#             print('index_current test 3 ', collection_id in chain)
+#             print('index_current test 4 ', target_collections is None or in_target_branch)
+#             print('index_current test for collection_id_lc ', collection_id_lc, index_current)
+#
+#             # Extract collection metadata and path_ids
+#             collection_metadata = extract_metadata(
+#             data,
+#             parent_id=parent_id,
+#             parent_path=parent_path,
+#             parent_path_ids=parent_path_ids
+#             )
+#
+#             collection_es_id = collection_metadata.get("id") or f"collection_{collection_id}"
+#
+#             if index_current:
+#                 print('indexing collection index_current', index_current)
+#                 await index_collection(app, collection_metadata)  # async helper: writes JSONL + stats
+#
+#             # Crawl members recursively
+#             for member in data.get("member", []):
+#                 member_type = member.get("@type")
+#                 member_id = member.get("@id")
+#                 member_chain_label = member.get("title")
+#                 if not member_id:
+#                     continue
+#                 member_chain = [member_id]
+#                 member_chain_label = [member_chain_label]
+#                 print('recursive crawling member ', member_id)
+#                 if member_type == "Collection":
+#                     # Always (?) explore the branch for target collections
+#
+#                     print("looping throught member_id", member_id + '\n')
+#
+#                     # ── Exclusion explicite : coupe la branche sans requête HTTP ──
+#                     if member_id.lower() in app.excluded_collections:
+#                         print(f"Skipping excluded collection member: {member_id}")
+#                         app.index_stats["excluded_collections"] = app.index_stats.get("excluded_collections", 0) + 1
+#                         continue
+#
+#                     print('crawled member : ', member)
+#                     await crawl_branch(
+#                         app=app,
+#                         chain=member_chain,
+#                         chain_label= member_chain_label,
+#                         collection_index=collection_index,
+#                         target_collections=target_collections,
+#                         visited=visited,
+#                         semaphore=semaphore,
+#                         resource_queue=resource_queue,
+#                         parent_id=collection_es_id,
+#                         parent_path=collection_metadata.get("path"),
+#                         parent_path_ids=collection_metadata.get("path_ids"),
+#                         in_target_branch = in_target_branch
+#                     )
+#
+#                 elif member_type == "Resource":
+#                     # Only index resources if parent or descendant is targeted
+#                     if index_current:
+#                         resource_metadata = extract_metadata(
+#                             member,
+#                             parent_id=parent_id,
+#                             parent_path=collection_metadata.get("path"),
+#                             parent_path_ids=collection_metadata.get("path_ids")
+#                         )
+#
+#                         if resource_queue is not None:
+#
+#                             await resource_queue.put(
+#                                 {
+#                                     "resource_id": member_id,
+#                                     "collections": [collection_metadata],
+#                                     "resource_metadata": resource_metadata
+#                                 }
+#                             )
+#
+#                         else:
+#
+#                             await index_resource_passages_async(
+#                                 app=app,
+#                                 resource_id=member_id,
+#                                 collections=[collection_metadata],
+#                                 resource_metadata=resource_metadata
+#                             )
+#
+# async def crawl_collection(app, collection_id: str, collection_index: str, target_collections: set | None = None, parent_id=None, parent_path=None, parent_path_ids=None):
+#     """
+#     Entry point to crawl collections.
+#     Handles full tree or only branches leading to target_collections.
+#     """
+#     semaphore = asyncio.Semaphore(app.config.get("MAX_CONCURRENT_REQUESTS", 5))
+#     visited = set()
+#
+#     resource_queue = asyncio.Queue(maxsize=200)
+#
+#     client = httpx.AsyncClient(
+#         timeout=httpx.Timeout(
+#             connect=10.0,
+#             read=120.0,
+#             write=30.0,
+#             pool=30.0
+#         ),
+#         limits=httpx.Limits(
+#             max_connections=10,
+#             max_keepalive_connections=10
+#         )
+#     )
+#
+#     RESOURCE_WORKERS = app.config.get(
+#         "RESOURCE_WORKERS",
+#         5
+#     )
+#
+#     workers = [
+#         asyncio.create_task(
+#             resource_worker(
+#                 queue=resource_queue,
+#                 app=app,
+#                 client=client
+#             )
+#         )
+#         for _ in range(RESOURCE_WORKERS)
+#     ]
+#
+#     root_collection_id = app.config['TARGET_COLLECTION']
+#     root_collection_name = app.config['TARGET_COLLECTION_NAME']
+#
+#     if target_collections:
+#         tasks = []
+#         for coll in target_collections:
+#             # Build breadcrumb from root to target
+#             print('crawl debug', root_collection_name)
+#             result = await build_parent_chain(app, coll, stop_at=root_collection_id, stop_at_name=root_collection_name)
+#             chain = result[0]
+#             chain_label = result[1]
+#             print('crawl_collection debug chain', chain)
+#             print('crawl_collection debug chain_label', chain_label)
+#             parent_id = chain[-2]
+#             print('crawl_collection debug parent_id', parent_id)
+#             tasks.append(crawl_branch(app, chain, chain_label, collection_index, target_collections, visited, semaphore, resource_queue, parent_id, parent_path, parent_path_ids))
+#         await asyncio.gather(*tasks)
+#
+#         await resource_queue.join()
+#
+#         for _ in workers:
+#             await resource_queue.put(None)
+#
+#         await asyncio.gather(*workers)
+#
+#         await client.aclose()
+#
+#     else:
+#         # Full tree crawl
+#         await crawl_branch(
+#             app=app,
+#             chain=[root_collection_id],
+#             chain_label=[],
+#             collection_index=collection_index,
+#             target_collections=None,
+#             visited=visited,
+#             semaphore=semaphore,
+#             resource_queue=resource_queue,
+#             parent_id=root_collection_id,
+#             parent_path=None,
+#             parent_path_ids=None
+#         )
+
 async def crawl_branch(app, chain: list[str], chain_label: list[str], collection_index: str, target_collections: set | None, visited: set, semaphore: asyncio.Semaphore, resource_queue: asyncio.Queue | None = None, parent_id=None, parent_path=None, parent_path_ids=None,
     in_target_branch=False):
     """
     Crawl a single branch of collections from root -> target.
     Only indexes collections in target_collections or non-excluded.
     """
+
     print('crawl_branch debug chain', chain)
     print('crawl_branch debug chain_label', chain_label)
+
+    # ─────────────────────────────────────────────
+    # Thunderdots lookup tables (ONE TIME BUILD)
+    # ─────────────────────────────────────────────
+    collection_results = {
+        c.get("@id") or c.get("id"): c
+        for c in app.thunderdots_results.get("collection_results", [])
+        if c.get("@id") or c.get("id")
+    }
+
+    resource_results = {
+        r.get("@id") or r.get("id"): {
+            **r,
+            "path": r.get("path") or [],
+            "path_ids": r.get("path_ids") or []
+        }
+        for r in app.thunderdots_results.get("resource_results", [])
+    }
+
     for collection_id in chain:
         collection_id_lc = collection_id.lower()
 
@@ -1303,77 +2053,88 @@ async def crawl_branch(app, chain: list[str], chain_label: list[str], collection
         )
 
         in_target_branch = in_target_branch or is_target
-        print('crawl_branch debug target_collections, is_target, in_target_branch', collection_id, collection_id_lc, target_collections,
-              is_target, in_target_branch)
+
+        print(
+            'crawl_branch debug target_collections, is_target, in_target_branch',
+            collection_id,
+            collection_id_lc,
+            target_collections,
+            is_target,
+            in_target_branch
+        )
+
         async with semaphore:
-            # Skip already visited collections
+
             if collection_id in visited:
                 continue
             visited.add(collection_id)
 
-            # Fetch collection details
-            try:
-                data = await fetch_collection(app, collection_id)  # async helper
-            except Exception as e:
-                print(f"⚠️ Impossible de récupérer la collection {collection_id}: {e}")
-                report_collection_exception(app, collection_id, e, context="crawl_branch_fetch")
-                continue
-            print("data for collection_id", collection_id + '\n')
+            # ─────────────────────────────
+            # REPLACEMENT FETCH_COLLECTION
+            # ─────────────────────────────
+            data = collection_results.get(collection_id)
 
             if not data or data.get("@type") != "Collection":
                 continue
 
-            # Decide whether to index this collection
+            print("data for collection_id", collection_id + '\n')
+
             index_current = (
                 collection_id_lc not in app.excluded_collections
                 and (target_collections is None or in_target_branch)
             )
+
             print('index_current test ', collection_id_lc not in app.excluded_collections)
             print('index_current test 2 ', target_collections is None)
             print('index_current test 3 ', collection_id in chain)
             print('index_current test 4 ', target_collections is None or in_target_branch)
             print('index_current test for collection_id_lc ', collection_id_lc, index_current)
 
-            # Extract collection metadata and path_ids
             collection_metadata = extract_metadata(
-            data,
-            parent_id=parent_id,
-            parent_path=parent_path,
-            parent_path_ids=parent_path_ids
+                data,
+                parent_id=parent_id,
+                parent_path=parent_path,
+                parent_path_ids=parent_path_ids
             )
 
             collection_es_id = collection_metadata.get("id") or f"collection_{collection_id}"
 
             if index_current:
                 print('indexing collection index_current', index_current)
-                await index_collection(app, collection_metadata)  # async helper: writes JSONL + stats
+                await index_collection(app, collection_metadata)
 
-            # Crawl members recursively
+            # ─────────────────────────────
+            # MEMBERS LOOP (UNCHANGED LOGIC)
+            # ─────────────────────────────
             for member in data.get("member", []):
+
                 member_type = member.get("@type")
                 member_id = member.get("@id")
                 member_chain_label = member.get("title")
+
                 if not member_id:
                     continue
+
                 member_chain = [member_id]
                 member_chain_label = [member_chain_label]
+
                 print('recursive crawling member ', member_id)
+
                 if member_type == "Collection":
-                    # Always (?) explore the branch for target collections
 
                     print("looping throught member_id", member_id + '\n')
 
-                    # ── Exclusion explicite : coupe la branche sans requête HTTP ──
                     if member_id.lower() in app.excluded_collections:
                         print(f"Skipping excluded collection member: {member_id}")
                         app.index_stats["excluded_collections"] = app.index_stats.get("excluded_collections", 0) + 1
                         continue
 
                     print('crawled member : ', member)
+
                     await crawl_branch(
                         app=app,
                         chain=member_chain,
-                        chain_label= member_chain_label,
+                        chain_label=member_chain_label,
                         collection_index=collection_index,
                         target_collections=target_collections,
                         visited=visited,
@@ -1382,18 +2143,42 @@ async def crawl_branch(app, chain: list[str], chain_label: list[str], collection
                         parent_id=collection_es_id,
                         parent_path=collection_metadata.get("path"),
                         parent_path_ids=collection_metadata.get("path_ids"),
-                        in_target_branch = in_target_branch
+                        in_target_branch=in_target_branch
                     )
 
                 elif member_type == "Resource":
-                    # Only index resources if parent or descendant is targeted
+
                     if index_current:
-                        resource_metadata = extract_metadata(
-                            member,
-                            parent_id=parent_id,
-                            parent_path=collection_metadata.get("path"),
-                            parent_path_ids=collection_metadata.get("path_ids")
-                        )
+
+                        # ─────────────────────────────
+                        # REPLACEMENT extract_metadata RESOURCE
+                        # ─────────────────────────────
+                        data = resource_results.get(member_id)
+
+
+                        if data:
+                            # injection du contexte crawl (inchangé fonctionnellement)
+
+                            resource_metadata = extract_metadata(
+                                data,
+                                parent_id=parent_id,
+                                parent_path=collection_metadata.get("path"),
+                                parent_path_ids=collection_metadata.get("path_ids")
+                            )
+
+                            #10juillet resource_metadata = extract_metadata(
+                            #     data,
+                            #     parent_id=parent_id,
+                            #     parent_path=collection_metadata.get("path"),
+                            #     parent_path_ids=collection_metadata.get("path_ids")
+                            # )
+
+                            # resource_metadata = {
+                            #     **data,
+                            #     "parent_id": parent_id,
+                            #     "parent_path": collection_metadata.get("path"),
+                            #     "parent_path_ids": collection_metadata.get("path_ids")
+                            # }
 
                         if resource_queue is not None:
 
@@ -1413,6 +2198,7 @@ async def crawl_branch(app, chain: list[str], chain_label: list[str], collection
                                 collections=[collection_metadata],
                                 resource_metadata=resource_metadata
                             )
+
 
 async def crawl_collection(app, collection_id: str, collection_index: str, target_collections: set | None = None, parent_id=None, parent_path=None, parent_path_ids=None):
     """
@@ -1496,7 +2282,6 @@ async def crawl_collection(app, collection_id: str, collection_index: str, targe
             parent_path_ids=None
         )
 
-
 async def dotsplorer(app, collections, _index_name):
     """
         Commande principale d'indexation :
@@ -1579,6 +2364,44 @@ async def dotsplorer(app, collections, _index_name):
         ensure_csv_file(csv_paths["indexed_passages_report"], [
             "timestamp", "resource_id", "passage_id"
         ])
+
+        from thunderdots import ThunderDots
+        print("Building Thunderdots global graph...")
+
+        td = ThunderDots(
+            endpoint_dts="https://dev.chartes.psl.eu/dots/api/dts",
+            collection_params={
+                "collection_id": app.config['TARGET_COLLECTION'],
+                "metadata_dublincore": None,
+                "metadata_extensions": None,
+            },
+            resource_params={
+                "fragment_mode": "navigation",
+                "metadata_dublincore": None,
+                "metadata_extensions": None,
+                "add_head_to_content": False,
+            },
+            fragment_params={
+                "metadata_dublincore": None
+            },
+        )
+
+        td.fetch()
+        td_results = td.results()
+
+        elastic_docs = td.to_elastic_documents(
+            include_fragments=False
+        )
+
+        # on le garde globalement accessible pour les facettes / autocomplete
+        app.thunderdots_results = td_results
+
+        app.thunderdots_temporal = {
+            doc["id"]: doc.get("temporal", {})
+            for doc in elastic_docs
+        }
+
+        print("Thunderdots graph built")
 
         # --- traitement des collections ciblées ---
         if collections:
@@ -1805,28 +2628,28 @@ def make_cli():
                         doc = json.loads(line)
 
                         # TODO: Previous mono-collection process to remove once multi-collection approach validated
-                        # bulk_actions.append({"index": {"_index": app.config["DOCUMENT_INDEX"],
-                        #                                "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'}})
-                        # bulk_actions.append(doc)
+                        bulk_actions.append({"index": {"_index": app.config["DOCUMENT_INDEX"],
+                                                       "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'}})
+                        bulk_actions.append(doc)
 
-                        bulk_actions.append({
-                            "update": {
-                                "_index": app.config["DOCUMENT_INDEX"],
-                                "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'
-                            }
-                        })
-
-                        bulk_actions.append({
-                            "scripted_upsert": True,
-                            "script": {
-                                "lang": "painless",
-                                "source": MERGE_COLLECTIONS_SCRIPT,
-                                "params": {
-                                    "collections": doc.get("collections", [])
-                                }
-                            },
-                            "upsert": doc
-                        })
+                        # bulk_actions.append({
+                        #     "update": {
+                        #         "_index": app.config["DOCUMENT_INDEX"],
+                        #         "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'
+                        #     }
+                        # })
+                        #
+                        # bulk_actions.append({
+                        #     "scripted_upsert": True,
+                        #     "script": {
+                        #         "lang": "painless",
+                        #         "source": MERGE_COLLECTIONS_SCRIPT,
+                        #         "params": {
+                        #             "collections": doc.get("collections", [])
+                        #         }
+                        #     },
+                        #     "upsert": doc
+                        # })
                     except Exception as e:
                         report_passage_indexation_errors(
                             app,
