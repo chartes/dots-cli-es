@@ -1,0 +1,26 @@
+# -------------------------------------------------------------------
+# Informations générales sur le projet et la sortie des données
+# -------------------------------------------------------------------
+#project:
+#  name: encpos                 # Nom logique du projet (utilisé pour l’identification)
+#  output_dir: ./out/encpos     # Dossier de sortie pour tous les artefacts générés
+#  overwrite: false             # Si false, empêche d’écraser un dossier existant non vide
+
+# -------------------------------------------------------------------
+# Source des données (API, dépôt, corpus distant, etc.)
+# -------------------------------------------------------------------
+source:
+  DTS_URL: "https://dev.chartes.psl.eu/dots/api/dts"  # Base URL of the source API http://localhost:8080/api/dts
+  TARGET_COLLECTION: "cartulaires"  # Identifiant de la collection racine à explorer empty by default
+  CUSTOM_SETTINGS_PATH: !!str ${CUSTOM_SETTINGS_PATH}
+  ADDITIONAL_EXCLUDED_COLLECTIONS: [ corpus, bfm, cid, racine, theater, cjc, ENCPOS, encpos_2, CLEM, formulaires, dubourg, miroir, comptes, obituaires, sanctoral_elec ]
+
+# -------------------------------------------------------------------
+# Configuration du moteur de recherche ES
+# -------------------------------------------------------------------
+config:
+  ELASTICSEARCH_URL: "http://elastic:${ES_PASSWORD}@127.0.0.1:9200"
+  DOCUMENT_INDEX: "dots_document"
+  COLLECTION_INDEX: "dots_collection"
+  SEARCH_RESULT_PER_PAGE: 200
+
