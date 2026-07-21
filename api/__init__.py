@@ -1,6 +1,6 @@
 from elasticsearch import Elasticsearch
 from flask import Flask, Blueprint
-from cli import load_config  # import load_config from your CLI
+from config_loader import load_config
 
 api_bp = Blueprint('api_bp', __name__)
 

@@ -4,3 +4,6 @@ out/*
 venv*/
 .idea/
 __pycache__
+
+.gitmodules
+external/*

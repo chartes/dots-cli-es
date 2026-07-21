@@ -2,7 +2,7 @@ import argparse
 import os
 
 from api import create_app
-from cli import load_config
+from config_loader import load_config
 
 POSSIBLE_ENV_VALUES = [ "local", "staging", "prod" ]
 
