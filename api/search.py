@@ -1645,7 +1645,6 @@ def register_search_endpoint(
                 print('\nbody : ', body_query)
                 search_result = current_app.elasticsearch.search(index=index, body=body_query)
 
-                print('\nsearch_results : ', search_result)
 
                 collection_facets = []
                 for bucket in search_result["aggregations"]["collections"]["buckets"]:
@@ -1725,7 +1724,7 @@ def register_search_endpoint(
                     "buckets": grouped_results,
                     "facets": facets,
                     "bucket_count": search_result["aggregations"]["resource_count"]["value"],
-                    "total_count": search_result["aggregations"]["resource_count"]["value"],
+                    "total_count": search_result["hits"]["total"]["value"],
                     "page": num_page,
                     "page_size": page_size,
                     "highlight_patterns": patterns,
