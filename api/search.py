@@ -1380,6 +1380,18 @@ def register_search_endpoint(
         page_size = max(int(request.args.get('page[size]', current_app.config["SEARCH_RESULT_PER_PAGE"])), 25)
 
         # Tri
+
+        default_sort = [
+            {
+                "temporal.temporal.dublincore.created_start": {
+                    "order": "asc",
+                    "missing": "_last"
+                }
+            },
+            {"_score": "desc"}
+        ]
+
+
         sort_criteriae: list[dict] = []
         if "sort" in request.args:
             for criteria in request.args["sort"].split(','):
@@ -1549,7 +1561,22 @@ def register_search_endpoint(
             # === CAS 2 : Full-text search grouped by resource using composite + top_hits ===
             else:
                 print('\nHIGHLIGHTS SEARCH')
-                # Corps principal de la requête
+
+                highlight_config = {
+                    "type": "unified",
+                    "require_field_match": True,
+                    "pre_tags": ["<mark>"],
+                    "post_tags": ["</mark>"],
+                    "fields": {
+                        "content": {
+                            "fragment_size": 80,
+                            "number_of_fragments": 100,
+                            "boundary_scanner": "sentence",
+                            "no_match_size": 50
+                        }
+                    }
+                }
+
                 body_query = {
                     "query": {
                         "bool": {
@@ -1557,39 +1584,23 @@ def register_search_endpoint(
                             "filter": [{"term": {"resource_metadata.path_ids.keyword": collection_id}}]
                         }
                     },
-                    "sort": sort_criteriae,
+                    "collapse": {
+                        "field": "resource_id",
+                        "inner_hits": {
+                            "name": "fragments",
+                            "size": 100,
+                            "sort": [{"_score": "desc"}],
+                            "highlight": highlight_config
+                        }
+                    },
+                    # tri par défaut = score ; sinon on préfixe avec les critères demandés
+                    "sort": sort_criteriae if sort_criteriae else default_sort,
+                    "from": (num_page - 1) * page_size,
+                    "size": page_size,
                     "track_total_hits": True,
                     "track_scores": True,
-                    "size": 0,  # récupérer hits seulement si highlight demandé
 
                     "aggregations": {
-                        "resources": {
-                            "composite": {
-                                "sources": [{"resource_id": {"terms": {"field": "resource_id"}}}],
-                                "size": page_size
-                            },
-                            "aggs": {
-                                "hits": {
-                                    "top_hits": {
-                                        "size": 100,
-                                        "highlight": {
-                                            "type": "unified",
-                                            "require_field_match": True,
-                                            "pre_tags": ["<mark>"],
-                                            "post_tags": ["</mark>"],
-                                            "fields": {
-                                                "content": {
-                                                    "fragment_size": 80,
-                                                    "number_of_fragments": 100,
-                                                    "boundary_scanner": "sentence",
-                                                    "no_match_size": 50
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        },
                         "resource_count": {
                             "cardinality": {
                                 "field": "resource_id",
@@ -1597,16 +1608,10 @@ def register_search_endpoint(
                             }
                         },
                         "collections": {
-                            "terms": {
-                                "field": "collection_facets",
-                                "size": 1000
-                            },
+                            "terms": {"field": "collection_facets", "size": 1000},
                             "aggs": {
                                 "resource_count": {
-                                    "cardinality": {
-                                        "field": "resource_id",
-                                        "precision_threshold": 40000
-                                    }
+                                    "cardinality": {"field": "resource_id", "precision_threshold": 40000}
                                 }
                             }
                         }
@@ -1614,78 +1619,41 @@ def register_search_endpoint(
                 }
 
                 body_query["aggregations"].update(build_temporal_aggs(temporal_fields))
-
                 body_query["aggregations"].update(build_searchfield_aggs())
 
-                # Ajouter la clause full-text
                 if query_param:
                     body_query["query"]["bool"]["must"].extend(parse_query_param(query_param, "fulltext"))
                 else:
                     body_query["query"]["bool"]["must"].append({"match_all": {}})
 
-                # Ajouter les ranges
                 if ranges:
                     body_query["query"]["bool"]["must"].extend([{"range": r} for r in ranges])
 
-                # Ajouter les filtres
                 if filters_param:
                     es_filters = parse_filters_param(filters_param)
                     if es_filters:
                         body_query["query"]["bool"].setdefault("filter", []).extend(es_filters)
 
-                # if collection_facet:
-                #     body_query["query"]["bool"].setdefault("filter", []).append({
-                #         "terms": {
-                #             "collection_facets": collection_facet
-                #         }
-                #     })
-
                 if selected_facets:
-
                     for facet_field, values in selected_facets.items():
-
                         if not values:
                             continue
-
                         es_field = get_facet_es_field(facet_field)
-
-                        body_query["query"]["bool"].setdefault(
-                            "filter",
-                            []
-                        ).append(
-                            {
-                                "terms": {
-                                    es_field: values
-                                }
-                            }
+                        body_query["query"]["bool"].setdefault("filter", []).append(
+                            {"terms": {es_field: values}}
                         )
-
-                # Pagination après pour composite
-                if after_key:
-                    body_query["aggregations"]["resources"]["composite"]["after"] = {
-                        "resource_id": after_key
-                    }
-
-                print('body_query', body_query)
-                print('\ncomposite', body_query["aggregations"]["resources"]["composite"])
+                print('\nbody : ', body_query)
                 search_result = current_app.elasticsearch.search(index=index, body=body_query)
-                #print('search_result', search_result)
 
-                # Récupération des buckets
-                buckets = search_result["aggregations"]["resources"]["buckets"]
-                bucket_count = len(buckets)
-
-                after_key = search_result["aggregations"]["resources"].get("after_key", None)
+                print('\nsearch_results : ', search_result)
 
                 collection_facets = []
-
                 for bucket in search_result["aggregations"]["collections"]["buckets"]:
                     try:
                         coll_id, label = bucket["key"].split("###", 1)
                     except ValueError:
                         coll_id = bucket["key"]
                         label = bucket["key"]
-
                     collection_facets.append({
                         "id": coll_id,
                         "label": label,
@@ -1695,46 +1663,37 @@ def register_search_endpoint(
 
                 if collection_facet:
                     collection_facets = [
-                        f for f in collection_facets
-                        if f["facet_key"] not in collection_facet
+                        f for f in collection_facets if f["facet_key"] not in collection_facet
                     ]
 
-
-                # Construire le résultat groupé directement depuis les hits
                 def add_ellipsis(fragment):
                     if not fragment:
                         return fragment
-
                     text = fragment.strip()
-
-                    # Ajouter "..." au début si ça ne commence pas par une majuscule (souvent milieu de phrase)
                     if text and text[0].islower():
                         text = "..." + text
-
-                    # Ajouter "..." à la fin si pas de ponctuation finale
                     if not text.endswith((".", "…", "!", "?")):
                         text = text + "..."
-
                     return text
 
                 grouped_results = []
 
-                for b in buckets:
-                    hits_list = b["hits"]["hits"]["hits"]
-
-                    if not hits_list:
+                for hit in search_result["hits"]["hits"]:
+                    inner_hits_list = hit["inner_hits"]["fragments"]["hits"]["hits"]
+                    if not inner_hits_list:
                         continue
 
-                    first_hit_source = hits_list[0]["_source"]
+                    # le hit top-level EST déjà un fragment représentatif de la ressource
+                    rep_source = hit["_source"]
 
                     grouped_results.append({
-                        "resource_id": b["key"]["resource_id"],
-                        "title": first_hit_source.get("resource_metadata", {}).get("dublincore", {}).get("title"),
-                        "creator": first_hit_source.get("resource_metadata", {}).get("dublincore", {}).get("creator"),
-                        "date": first_hit_source.get("resource_metadata", {}).get("dublincore", {}).get("created"),
+                        "resource_id": rep_source.get("resource_id"),
+                        "title": rep_source.get("resource_metadata", {}).get("dublincore", {}).get("title"),
+                        "creator": rep_source.get("resource_metadata", {}).get("dublincore", {}).get("creator"),
+                        "date": rep_source.get("resource_metadata", {}).get("dublincore", {}).get("created"),
                         "collection_ids": list({
                             c.get("collection_id")
-                            for c in first_hit_source.get("collections", [])
+                            for c in rep_source.get("collections", [])
                             if c.get("collection_id")
                         }),
                         "hits": [
@@ -1751,45 +1710,11 @@ def register_search_endpoint(
                                     ]
                                 }
                             }
-                            for h in hits_list
+                            for h in inner_hits_list
                         ]
                     })
 
-                temporal_facets = extract_temporal_facets(
-                    search_result["aggregations"],
-                    temporal_fields
-                )
-
-                # aggs = search_result["aggregations"]
-                #
-                # def safe_int(value):
-                #     return int(value) if value is not None else None
-                #
-                # temporal = {
-                #     "promotion": {
-                #         "min": safe_int(
-                #             aggs["promotion_min"]["value"]
-                #         ),
-                #         "max": safe_int(
-                #             aggs["promotion_max"]["value"]
-                #         )
-                #     },
-                #     "coverage": {
-                #         "min": safe_int(
-                #             aggs["coverage_min"]["value"]
-                #         ),
-                #         "max": safe_int(
-                #             aggs["coverage_max"]["value"]
-                #         )
-                #     }
-                # }
-
-                # r = {
-                #     "buckets": grouped_results,
-                #     "after_key": after_key,
-                #     "bucket_count": bucket_count,
-                #     "total_count": search_result["hits"]["total"]["value"]
-                # }
+                temporal_facets = extract_temporal_facets(search_result["aggregations"], temporal_fields)
 
                 facets = {
                     "collections": collection_facets,
@@ -1798,12 +1723,11 @@ def register_search_endpoint(
 
                 r = {
                     "buckets": grouped_results,
-
                     "facets": facets,
-
-                    "after_key": after_key["resource_id"],
                     "bucket_count": search_result["aggregations"]["resource_count"]["value"],
-                    "total_count": search_result["hits"]["total"]["value"],
+                    "total_count": search_result["aggregations"]["resource_count"]["value"],
+                    "page": num_page,
+                    "page_size": page_size,
                     "highlight_patterns": patterns,
                     "temporal": temporal_facets
                 }
