@@ -775,7 +775,7 @@ def build_searchfield_aggs():
         aggs[field.id] = {
             "terms": {
                 "field": get_es_field(field),
-                "size": 1000
+                "size": 10000
             },
             "aggs": {
                 "resource_count": {

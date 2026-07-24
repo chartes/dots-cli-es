@@ -1402,6 +1402,10 @@ def register_search_endpoint(
                 sort_criteriae.append({criteria: {"order": sort_order}})
 
         r = {}
+
+        collection_filters = []
+        other_filters = []
+
         try:
 
             # === CAS 1 : Recherche simple sur ressources filtrée par collection ===
@@ -1425,12 +1429,12 @@ def register_search_endpoint(
                     "size": page_size,
                     "track_total_hits": True,
                     "aggregations": {
-                        "collections_fac": {
-                            "terms": {
-                                "field": "collection_facets",
-                                "size": 100000
-                            }
-                        }
+                        # "collections_fac": {
+                        #     "terms": {
+                        #         "field": "collection_facets",
+                        #         "size": 100000
+                        #     }
+                        # }
                     }
                 }
                 body_query["aggregations"].update(build_temporal_aggs(temporal_fields))
@@ -1462,25 +1466,64 @@ def register_search_endpoint(
                 #         }
                 #     })
 
+                # if selected_facets:
+                #
+                #     for facet_field, values in selected_facets.items():
+                #
+                #         if not values:
+                #             continue
+                #
+                #         es_field = get_facet_es_field(facet_field)
+                #
+                #         body_query["query"]["bool"].setdefault(
+                #             "filter",
+                #             []
+                #         ).append(
+                #             {
+                #                 "terms": {
+                #                     es_field: values
+                #                 }
+                #             }
+                #         )
                 if selected_facets:
-
                     for facet_field, values in selected_facets.items():
-
                         if not values:
                             continue
 
                         es_field = get_facet_es_field(facet_field)
+                        clause = {"terms": {es_field: values}}
 
-                        body_query["query"]["bool"].setdefault(
-                            "filter",
-                            []
-                        ).append(
-                            {
+                        if facet_field == "collections":
+                            collection_filters.append(clause)
+                            body_query["query"]["bool"].setdefault("filter", []).append(clause)
+                        else:
+                            other_filters.append(clause)
+                            body_query["query"]["bool"].setdefault("filter", []).append(clause)
+
+                # if collection_filters:
+                #     body_query["post_filter"] = {
+                #         "bool": {"filter": collection_filters}
+                #     }
+
+                coll_agg = {
+                    "collections_fac": {
+                        "filter": {
+                            "bool": {
+                                "must": body_query["query"]["bool"]["must"],
+                                "filter": other_filters
+                            }
+                        },
+                        "aggs": {
+                            "values": {
                                 "terms": {
-                                    es_field: values
+                                    "field": "collection_facets",
+                                    "size": 100000
                                 }
                             }
-                        )
+                        }
+                    }
+                }
+                body_query["aggregations"].update(coll_agg)
 
                 search_result = current_app.elasticsearch.search(index=index, body=body_query)
                 print('\nbody_query')
@@ -1491,7 +1534,7 @@ def register_search_endpoint(
                 print(search_result)
                 collection_facets = []
 
-                for bucket in search_result["aggregations"]["collections_fac"]["buckets"]:
+                for bucket in search_result["aggregations"]["collections_fac"]["values"]["buckets"]:
                     try:
                         coll_id, label = bucket["key"].split("###", 1)
                     except ValueError:
@@ -1607,14 +1650,14 @@ def register_search_endpoint(
                                 "precision_threshold": 40000
                             }
                         },
-                        "collections": {
-                            "terms": {"field": "collection_facets", "size": 1000},
-                            "aggs": {
-                                "resource_count": {
-                                    "cardinality": {"field": "resource_id", "precision_threshold": 40000}
-                                }
-                            }
-                        }
+                        # "collections": {
+                        #     "terms": {"field": "collection_facets", "size": 1000},
+                        #     "aggs": {
+                        #         "resource_count": {
+                        #             "cardinality": {"field": "resource_id", "precision_threshold": 40000}
+                        #         }
+                        #     }
+                        # }
                     }
                 }
 
@@ -1634,20 +1677,104 @@ def register_search_endpoint(
                     if es_filters:
                         body_query["query"]["bool"].setdefault("filter", []).extend(es_filters)
 
+                # if selected_facets:
+                #     for facet_field, values in selected_facets.items():
+                #         if not values:
+                #             continue
+                #         es_field = get_facet_es_field(facet_field)
+                #         body_query["query"]["bool"].setdefault("filter", []).append(
+                #             {"terms": {es_field: values}}
+                #         )
                 if selected_facets:
                     for facet_field, values in selected_facets.items():
                         if not values:
                             continue
+
                         es_field = get_facet_es_field(facet_field)
-                        body_query["query"]["bool"].setdefault("filter", []).append(
-                            {"terms": {es_field: values}}
-                        )
+
+                        clause = {
+                            "terms": {
+                                es_field: values
+                            }
+                        }
+
+                        # if facet_field == "collections":
+                        #     collection_filters.append(clause)
+                        # else:
+                        #     other_filters.append(clause)
+                        #     body_query["query"]["bool"].setdefault(
+                        #         "filter", []
+                        #     ).append(clause)
+                        if facet_field == "collections":
+                            collection_filters.append(clause)
+                            body_query["query"]["bool"].setdefault("filter", []).append(clause)
+                        else:
+                            other_filters.append(clause)
+                            body_query["query"]["bool"].setdefault("filter", []).append(clause)
+
+
+                coll_agg = {
+                    "collections": {
+                        "filter": {
+                            "bool": {
+                                "must": body_query["query"]["bool"]["must"],
+                                "filter": other_filters
+                            }
+                        },
+                        "aggs": {
+                            "values": {
+                                "terms": {
+                                    "field": "collection_facets",
+                                    "size": 1000
+                                },
+                                "aggs": {
+                                    "resource_count": {
+                                        "cardinality": {
+                                            "field": "resource_id",
+                                            "precision_threshold": 40000
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                body_query["aggregations"].update(coll_agg)
+
+                # if collection_filters:
+                #     body_query["post_filter"] = {
+                #         "bool": {
+                #             "filter": collection_filters
+                #         }
+                #     }
+
+                body_query["aggregations"]["filtered_resource_count"] = {
+                    "filter": {
+                        "bool": {
+                            "must": body_query["query"]["bool"]["must"],
+                            "filter": (
+                                    other_filters +
+                                    collection_filters
+                            )
+                        }
+                    },
+                    "aggs": {
+                        "count": {
+                            "cardinality": {
+                                "field": "resource_id",
+                                "precision_threshold": 40000
+                            }
+                        }
+                    }
+                }
+
                 print('\nbody : ', body_query)
                 search_result = current_app.elasticsearch.search(index=index, body=body_query)
 
 
                 collection_facets = []
-                for bucket in search_result["aggregations"]["collections"]["buckets"]:
+                for bucket in search_result["aggregations"]["collections"]["values"]["buckets"]:
                     try:
                         coll_id, label = bucket["key"].split("###", 1)
                     except ValueError:
@@ -1723,7 +1850,8 @@ def register_search_endpoint(
                 r = {
                     "buckets": grouped_results,
                     "facets": facets,
-                    "bucket_count": search_result["aggregations"]["resource_count"]["value"],
+                    "bucket_count": search_result["aggregations"]["filtered_resource_count"]["count"]["value"],
+                    # "bucket_count": search_result["aggregations"]["resource_count"]["value"],
                     "total_count": search_result["hits"]["total"]["value"],
                     "page": num_page,
                     "page_size": page_size,
