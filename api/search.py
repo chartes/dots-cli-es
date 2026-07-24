@@ -1411,11 +1411,14 @@ def register_search_endpoint(
             # === CAS 1 : Recherche simple sur ressources filtrée par collection ===
             if no_highlight:
                 print('\nRESOURCE SEARCH')
+
+                scope_filter = {"term": {"resource_metadata.path_ids.keyword": collection_id}}
+
                 body_query = {
                     "query": {
                         "bool": {
                             "must": [{"term": {"type.keyword": "Resource"}}],
-                            "filter": [{"term": {"resource_metadata.path_ids.keyword": collection_id}}]
+                            "filter": [scope_filter]
                         }
                     },
                     "_source": [
@@ -1507,17 +1510,22 @@ def register_search_endpoint(
 
                 coll_agg = {
                     "collections_fac": {
-                        "filter": {
-                            "bool": {
-                                "must": body_query["query"]["bool"]["must"],
-                                "filter": other_filters
-                            }
-                        },
+                        "global": {},
                         "aggs": {
-                            "values": {
-                                "terms": {
-                                    "field": "collection_facets",
-                                    "size": 100000
+                            "filtered": {
+                                "filter": {
+                                    "bool": {
+                                        "must": body_query["query"]["bool"]["must"],
+                                        "filter": [scope_filter] + other_filters
+                                    }
+                                },
+                                "aggs": {
+                                    "values": {
+                                        "terms": {
+                                            "field": "collection_facets",
+                                            "size": 100000
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1534,7 +1542,7 @@ def register_search_endpoint(
                 print(search_result)
                 collection_facets = []
 
-                for bucket in search_result["aggregations"]["collections_fac"]["values"]["buckets"]:
+                for bucket in search_result["aggregations"]["collections_fac"]["filtered"]["values"]["buckets"]:
                     try:
                         coll_id, label = bucket["key"].split("###", 1)
                     except ValueError:
@@ -1605,6 +1613,8 @@ def register_search_endpoint(
             else:
                 print('\nHIGHLIGHTS SEARCH')
 
+                scope_filter = {"term": {"resource_metadata.path_ids.keyword": collection_id}}
+
                 highlight_config = {
                     "type": "unified",
                     "require_field_match": True,
@@ -1624,7 +1634,7 @@ def register_search_endpoint(
                     "query": {
                         "bool": {
                             "must": [{"term": {"type.keyword": "fragment"}}],
-                            "filter": [{"term": {"resource_metadata.path_ids.keyword": collection_id}}]
+                            "filter": [scope_filter]
                         }
                     },
                     "collapse": {
@@ -1712,26 +1722,32 @@ def register_search_endpoint(
                             other_filters.append(clause)
                             body_query["query"]["bool"].setdefault("filter", []).append(clause)
 
-
                 coll_agg = {
                     "collections": {
-                        "filter": {
-                            "bool": {
-                                "must": body_query["query"]["bool"]["must"],
-                                "filter": other_filters
-                            }
-                        },
+                        "global": {},
                         "aggs": {
-                            "values": {
-                                "terms": {
-                                    "field": "collection_facets",
-                                    "size": 1000
+                            "filtered": {
+                                "filter": {
+                                    "bool": {
+                                        "must": [
+                                            m for m in body_query["query"]["bool"]["must"]
+                                        ],
+                                        "filter": [scope_filter] + other_filters
+                                    }
                                 },
                                 "aggs": {
-                                    "resource_count": {
-                                        "cardinality": {
-                                            "field": "resource_id",
-                                            "precision_threshold": 40000
+                                    "values": {
+                                        "terms": {
+                                            "field": "collection_facets",
+                                            "size": 1000
+                                        },
+                                        "aggs": {
+                                            "resource_count": {
+                                                "cardinality": {
+                                                    "field": "resource_id",
+                                                    "precision_threshold": 40000
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1739,6 +1755,7 @@ def register_search_endpoint(
                         }
                     }
                 }
+                print("coll_agg filter:", coll_agg["collections"]["aggs"]["filtered"]["filter"]["bool"]["filter"])
 
                 body_query["aggregations"].update(coll_agg)
 
@@ -1774,7 +1791,7 @@ def register_search_endpoint(
 
 
                 collection_facets = []
-                for bucket in search_result["aggregations"]["collections"]["values"]["buckets"]:
+                for bucket in search_result["aggregations"]["collections"]["filtered"]["values"]["buckets"]:
                     try:
                         coll_id, label = bucket["key"].split("###", 1)
                     except ValueError:
