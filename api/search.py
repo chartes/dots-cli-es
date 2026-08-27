@@ -1422,10 +1422,7 @@ def register_search_endpoint(
                         }
                     },
                     "_source": [
-                        "resource_metadata.dublincore.title",
-                        "resource_metadata.dublincore.creator",
-                        "resource_metadata.dublincore.created",
-                        "resource_metadata.dublincore.coverage"
+                        "resource_metadata"
                     ],
                     "sort": sort_criteriae,
                     "from": (num_page - 1) * page_size,
@@ -1588,10 +1585,7 @@ def register_search_endpoint(
                 results = [
                     {
                         "resource_id": hit["_id"],
-                        "title": hit["_source"].get("resource_metadata", {}).get("dublincore", {}).get("title"),
-                        "creator": hit["_source"].get("resource_metadata", {}).get("dublincore", {}).get("creator"),
-                        "date": hit["_source"].get("resource_metadata", {}).get("dublincore", {}).get("created"),
-                        "coverage": hit["_source"].get("resource_metadata", {}).get("dublincore", {}).get("coverage")
+                        **hit["_source"].get("resource_metadata", {})
                     }
                     for hit in search_result["hits"]["hits"]
                 ]
@@ -1828,12 +1822,11 @@ def register_search_endpoint(
 
                     # le hit top-level EST déjà un fragment représentatif de la ressource
                     rep_source = hit["_source"]
+                    resource_metadata = rep_source.get("resource_metadata", {})
 
                     grouped_results.append({
                         "resource_id": rep_source.get("resource_id"),
-                        "title": rep_source.get("resource_metadata", {}).get("dublincore", {}).get("title"),
-                        "creator": rep_source.get("resource_metadata", {}).get("dublincore", {}).get("creator"),
-                        "date": rep_source.get("resource_metadata", {}).get("dublincore", {}).get("created"),
+                        **resource_metadata,
                         "collection_ids": list({
                             c.get("collection_id")
                             for c in rep_source.get("collections", [])
