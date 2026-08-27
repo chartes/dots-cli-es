@@ -3,40 +3,40 @@
     "dynamic": "strict",
     "dynamic_templates": [
       {
-  "temporal_dates": {
-    "path_match": "temporal.*_iso",
-    "mapping": {
-      "type": "date"
-    }
-  }
-},
-{
-  "temporal_years": {
-    "path_match": "temporal.*_start",
-    "match_mapping_type": "long",
-    "mapping": {
-      "type": "integer"
-    }
-  }
-},
-{
-  "temporal_years_end": {
-    "path_match": "temporal.*_end",
-    "match_mapping_type": "long",
-    "mapping": {
-      "type": "integer"
-    }
-  }
-},
-{
-  "temporal_strings": {
-    "path_match": "temporal.*",
-    "match_mapping_type": "string",
-    "mapping": {
-      "type": "keyword"
-    }
-  }
-},
+        "temporal_dates": {
+          "path_match": "temporal.*_iso",
+          "mapping": {
+            "type": "date"
+          }
+        }
+      },
+      {
+        "temporal_years": {
+          "path_match": "temporal.*_start",
+          "match_mapping_type": "long",
+          "mapping": {
+            "type": "integer"
+          }
+        }
+      },
+      {
+        "temporal_years_end": {
+          "path_match": "temporal.*_end",
+          "match_mapping_type": "long",
+          "mapping": {
+            "type": "integer"
+          }
+        }
+      },
+      {
+        "temporal_strings": {
+          "path_match": "temporal.*",
+          "match_mapping_type": "string",
+          "mapping": {
+            "type": "keyword"
+          }
+        }
+      },
       {
         "resource_metadata_strings": {
           "path_match": "resource_metadata.*",
