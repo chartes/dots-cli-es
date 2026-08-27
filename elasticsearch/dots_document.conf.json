@@ -53,6 +53,23 @@
             }
           }
         }
+      },
+      {
+        "fragment_metadata_strings": {
+          "path_match": "fragment_metadata.*",
+          "match_mapping_type": "string",
+          "mapping": {
+            "type": "text",
+            "analyzer": "folding",
+            "term_vector": "with_positions_offsets",
+            "fields": {
+              "keyword": {
+                "type": "keyword",
+                "ignore_above": 256
+              }
+            }
+          }
+        }
       }
     ],
 
@@ -130,6 +147,10 @@
         "type": "keyword"
       },
       "resource_metadata": {
+        "type": "object",
+        "dynamic": true
+      },
+      "fragment_metadata": {
         "type": "object",
         "dynamic": true
       },

@@ -15,7 +15,7 @@ from lxml import etree
 
 from config_loader import load_config
 
-from api.search_fields import SEARCH_FIELDS, SearchFieldFamily, build_filtered_temporal_metadata
+from api.search_fields import SEARCH_FIELDS, SearchField, get_value, SearchFieldFamily, build_filtered_temporal_metadata
 
 
 # ============================================================
@@ -1264,6 +1264,10 @@ async def index_resource_passages_async(
                 "level": fragment.get("level"),
                 "title": fragment.get("head"),
                 "content": text,
+                "fragment_metadata": {
+                    "dublincore": fragment.get("metadata_dublincore", {}),
+                    "extensions": fragment.get("metadata_extensions", {})
+                },
                 "path": resource_metadata.get("path"),
                 "path_ids": resource_metadata.get("path_ids"),
                 "ancestors": ancestors,
