@@ -64,38 +64,95 @@ def get_temporal_fields(es, index: str) -> list[str]:
 
     return sorted(temporal_fields)
 
-def build_temporal_aggs(temporal_fields: list[str]) -> dict:
-    """
-    Construit automatiquement les agrégations min/max.
 
-    Exemple :
-
-    temporal.dublincore.coverage
-
-    =>
-    coverage_min
-    coverage_max
-    """
-
+def build_temporal_aggs(
+    temporal_fields,
+    base_must,
+    base_filters,
+    ranges
+):
     aggs = {}
 
     for field in temporal_fields:
 
         key = field.replace(".", "__")
 
-        aggs[f"{key}_min"] = {
-            "min": {
-                "field": field + "_start"
-            }
+        start_field = field + "_start"
+        end_field = field + "_end"
+
+        # Toutes les ranges SAUF celles qui concernent
+        # la facette temporelle courante.
+        facet_ranges = []
+
+        for range_query in ranges:
+            if start_field in range_query:
+                continue
+
+            if end_field in range_query:
+                continue
+
+            facet_ranges.append({
+                "range": range_query
+            })
+
+        facet_bool = {
+            "must": list(base_must),
+            "filter": list(base_filters) + facet_ranges
         }
 
-        aggs[f"{key}_max"] = {
-            "max": {
-                "field": field + "_end"
+        aggs[f"{key}_available"] = {
+            "global": {},
+            "aggs": {
+                "filtered": {
+                    "filter": {
+                        "bool": facet_bool
+                    },
+                    "aggs": {
+
+                        # Enveloppe globale des plages
+                        "min": {
+                            "min": {
+                                "field": start_field
+                            }
+                        },
+                        "max": {
+                            "max": {
+                                "field": end_field
+                            }
+                        },
+
+                        # # Intersection commune
+                        # "intersection_min": {
+                        #     "max": {
+                        #         "field": start_field
+                        #     }
+                        # },
+                        # "intersection_max": {
+                        #     "min": {
+                        #         "field": end_field
+                        #     }
+                        # }
+                    }
+                }
             }
         }
 
     return aggs
+
+
+def unflatten_dict(data):
+    result = {}
+
+    for key, value in data.items():
+        parts = key.split(".")
+        current = result
+
+        for part in parts[:-1]:
+            current = current.setdefault(part, {})
+
+        current[parts[-1]] = value
+
+    return result
 
 
 def default_label(field: str) -> str:
@@ -134,12 +191,6 @@ def extract_temporal_facets(
     aggregations: dict,
     temporal_fields: list[str]
 ) -> list[dict]:
-    """
-    Reconstruit les facettes temporelles exploitables.
-
-    Ignore automatiquement les champs absents
-    (min/max = None).
-    """
 
     facets = []
 
@@ -147,26 +198,78 @@ def extract_temporal_facets(
 
         key = field.replace(".", "__")
 
-        min_value = aggregations[f"{key}_min"]["value"]
-        max_value = aggregations[f"{key}_max"]["value"]
+        available = aggregations.get(
+            f"{key}_available"
+        )
+
+        if not available:
+            continue
+
+        filtered = available.get("filtered")
+
+        if not filtered:
+            continue
+
+        min_value = filtered["min"]["value"]
+        max_value = filtered["max"]["value"]
 
         if min_value is None or max_value is None:
             continue
 
+        # intersection_min = filtered["intersection_min"]["value"]
+        # intersection_max = filtered["intersection_max"]["value"]
+        #
+        # intersection = None
+        #
+        # if (
+        #     intersection_min is not None
+        #     and intersection_max is not None
+        #     and intersection_min <= intersection_max
+        # ):
+        #     intersection = {
+        #         "min": int(intersection_min),
+        #         "max": int(intersection_max)
+        #     }
+
         facets.append({
             "id": field.split(".")[-1],
             "label": default_label(field),
-
-            # champ affiché/logique
             "field": field,
-
-            # champs réellement utilisables dans une requête ES
             "start_field": field + "_start",
             "end_field": field + "_end",
-
             "min": int(min_value),
-            "max": int(max_value)
-        })
+            "max": int(max_value),
+        })#"intersection": intersection
 
     return facets
+
+
+def build_open_range(range_query):
+    field, condition = next(iter(range_query.items()))
+
+    return {
+        "bool": {
+            "should": [
+                {
+                    "range": {
+                        field: condition
+                    }
+                },
+                {
+                    "bool": {
+                        "must_not": [
+                            {
+                                "exists": {
+                                    "field": field
+                                }
+                            }
+                        ]
+                    }
+                }
+            ],
+            "minimum_should_match": 1
+        }
+    }
+
+
 
