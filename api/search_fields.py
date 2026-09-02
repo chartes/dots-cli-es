@@ -775,13 +775,13 @@ def build_searchfield_aggs():
         aggs[field.id] = {
             "terms": {
                 "field": get_es_field(field),
-                "size": 10000
+                "size": 15000
             },
             "aggs": {
                 "resource_count": {
                     "cardinality": {
                         "field": "resource_id",
-                        "precision_threshold": 40000
+                        "precision_threshold": 15000
                     }
                 }
             }

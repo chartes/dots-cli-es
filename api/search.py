@@ -480,7 +480,7 @@ def register_search_endpoint(
                                     "values": {
                                         "terms": {
                                             "field": "collection_facets",
-                                            "size": 100000
+                                            "size": 1000
                                         }
                                     }
                                 }
@@ -609,7 +609,7 @@ def register_search_endpoint(
                         "resource_count": {
                             "cardinality": {
                                 "field": "resource_id",
-                                "precision_threshold": 40000
+                                "precision_threshold": 1
                             }
                         },
                     }
@@ -670,7 +670,7 @@ def register_search_endpoint(
                                             "resource_count": {
                                                 "cardinality": {
                                                     "field": "resource_id",
-                                                    "precision_threshold": 40000
+                                                    "precision_threshold": 1
                                                 }
                                             }
                                         }
@@ -716,7 +716,7 @@ def register_search_endpoint(
                         "count": {
                             "cardinality": {
                                 "field": "resource_id",
-                                "precision_threshold": 40000
+                                "precision_threshold": 15000
                             }
                         }
                     }
