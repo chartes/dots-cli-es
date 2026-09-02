@@ -762,7 +762,15 @@ def get_value(
 # Metadata facets helpers
 # ----------------------------------------------------------------------
 
-def build_searchfield_aggs():
+def build_searchfield_aggs(exclude_ids: set[str] | None = None):
+    """
+    Build the terms aggregations for the metadata facets.
+
+    exclude_ids: facets explicitly disabled by the client
+    (searchConfig.facets, entries with "enabled": false). This mirrors the
+    front semantics: a facet missing from the config is still built.
+    None / set() => historical behaviour.
+    """
     aggs = {}
 
     for field in SEARCH_FIELDS:
@@ -770,6 +778,9 @@ def build_searchfield_aggs():
             continue
 
         if field.type != SearchFieldType.KEYWORD:
+            continue
+
+        if exclude_ids and field.id in exclude_ids:
             continue
 
         aggs[field.id] = {
@@ -806,11 +817,21 @@ def get_facet_es_field(facet_id):
         f"Unknown facet field {facet_id}"
     )
 
-def extract_searchfield_facets(aggregations):
+def extract_searchfield_facets(aggregations, exclude_ids: set[str] | None = None):
+    """
+    Extract the terms facets from the ES result.
+
+    exclude_ids must mirror the filtering passed to build_searchfield_aggs,
+    otherwise empty facets would be returned for the aggregations that were
+    never requested.
+    """
     facets = {}
 
     for field in SEARCH_FIELDS:
         if not field.facet or field.is_range_facet:
+            continue
+
+        if exclude_ids and field.id in exclude_ids:
             continue
 
         buckets = aggregations.get(field.id, {}).get("buckets", [])

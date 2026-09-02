@@ -347,6 +347,50 @@ def register_search_endpoint(
             index
         )
 
+        # Temporal facets explicitly disabled by the client
+        # (searchConfig.temporalFacets, entries with "enabled": false).
+        # Same declarative semantics as excludeFacets below: a facet that
+        # is not declared is still computed and returned, and the front
+        # displays it with its default label. Declaring an entry therefore
+        # only serves to customise it (label, order) or to exclude it.
+        # Filtering happens HERE, after get_temporal_fields, so that its
+        # lru_cache -- keyed on (es, index) -- stays effective.
+        excluded_temporal_param = request.args.get("excludeTemporalFacets")
+
+        if excluded_temporal_param:
+            excluded_temporal = {
+                t.strip()
+                for t in excluded_temporal_param.split(",")
+                if t.strip()
+            }
+
+            temporal_fields = [
+                f for f in temporal_fields
+                if f.split(".")[-1] not in excluded_temporal
+            ]
+
+        # Metadata facets (searchConfig.facets on the front side).
+        # This mirrors the exact semantics of the front rendering, which is
+        # an explicit EXCLUSION: a facet missing from the config is still
+        # displayed. The client therefore sends the disabled facets, not
+        # the enabled ones -- otherwise a partial config (e.g. cid.conf,
+        # which only declares "collections": false) would make every other
+        # facet disappear.
+        excluded_param = request.args.get("excludeFacets")
+
+        excluded_facets = set()
+
+        if excluded_param:
+            excluded_facets = {
+                f.strip()
+                for f in excluded_param.split(",")
+                if f.strip()
+            }
+
+        # The "collections" facet does not come from SEARCH_FIELDS: it has
+        # its own aggregation (global + terms), built further down.
+        with_collections = "collections" not in excluded_facets
+
         query_param: str = request.args.get("query", None)
         patterns = extract_highlight_patterns(query_param)
 
@@ -436,7 +480,9 @@ def register_search_endpoint(
                     }
                 }
 
-                body_query["aggregations"].update(build_searchfield_aggs())
+                body_query["aggregations"].update(
+                    build_searchfield_aggs(excluded_facets)
+                )
 
                 # Ajouter la clause terme de la notice
                 if query_param:
@@ -491,7 +537,8 @@ def register_search_endpoint(
                 base_must = body_query["query"]["bool"]["must"]
                 base_filters = body_query["query"]["bool"]["filter"]
 
-                body_query["aggregations"].update(coll_agg)
+                if with_collections:
+                    body_query["aggregations"].update(coll_agg)
 
                 body_query["aggregations"].update(
                     build_temporal_aggs(
@@ -516,7 +563,15 @@ def register_search_endpoint(
                 #print(search_result)
                 collection_facets = []
 
-                for bucket in search_result["aggregations"]["collections_fac"]["filtered"]["values"]["buckets"]:
+                collections_buckets = []
+
+                if with_collections:
+                    collections_buckets = (
+                        search_result["aggregations"]["collections_fac"]
+                        ["filtered"]["values"]["buckets"]
+                    )
+
+                for bucket in collections_buckets:
                     try:
                         coll_id, label = bucket["key"].split("###", 1)
                     except ValueError:
@@ -549,9 +604,14 @@ def register_search_endpoint(
                 ]
 
                 facets = {
-                    "collections": collection_facets,
-                    **extract_searchfield_facets(search_result["aggregations"])
+                    **extract_searchfield_facets(
+                        search_result["aggregations"],
+                        excluded_facets
+                    )
                 }
+
+                if with_collections:
+                    facets["collections"] = collection_facets
 
                 r = {
                     "data": results,
@@ -615,7 +675,9 @@ def register_search_endpoint(
                     }
                 }
 
-                body_query["aggregations"].update(build_searchfield_aggs())
+                body_query["aggregations"].update(
+                    build_searchfield_aggs(excluded_facets)
+                )
 
                 if query_param:
                     body_query["query"]["bool"]["must"].extend(parse_query_param(query_param, "fulltext"))
@@ -685,7 +747,8 @@ def register_search_endpoint(
                 base_must = body_query["query"]["bool"]["must"]
                 base_filters = body_query["query"]["bool"]["filter"]
 
-                body_query["aggregations"].update(coll_agg)
+                if with_collections:
+                    body_query["aggregations"].update(coll_agg)
 
                 body_query["aggregations"].update(
                     build_temporal_aggs(
@@ -727,7 +790,16 @@ def register_search_endpoint(
 
 
                 collection_facets = []
-                for bucket in search_result["aggregations"]["collections"]["filtered"]["values"]["buckets"]:
+
+                collections_buckets = []
+
+                if with_collections:
+                    collections_buckets = (
+                        search_result["aggregations"]["collections"]
+                        ["filtered"]["values"]["buckets"]
+                    )
+
+                for bucket in collections_buckets:
                     try:
                         coll_id, label = bucket["key"].split("###", 1)
                     except ValueError:
@@ -800,9 +872,14 @@ def register_search_endpoint(
                 temporal_facets = extract_temporal_facets(search_result["aggregations"], temporal_fields)
 
                 facets = {
-                    "collections": collection_facets,
-                    **extract_searchfield_facets(search_result["aggregations"])
+                    **extract_searchfield_facets(
+                        search_result["aggregations"],
+                        excluded_facets
+                    )
                 }
+
+                if with_collections:
+                    facets["collections"] = collection_facets
 
                 r = {
                     "buckets": grouped_results,
