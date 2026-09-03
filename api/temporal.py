@@ -1,4 +1,13 @@
+import logging
+
 from functools import lru_cache
+
+from .search_fields import (
+    metadata_key_from_path,
+    range_field_by_es_path
+)
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=8)
@@ -63,6 +72,36 @@ def get_temporal_fields(es, index: str) -> list[str]:
         temporal_fields.append(logical_field)
 
     return sorted(temporal_fields)
+
+
+@lru_cache(maxsize=64)
+def temporal_key(field: str) -> str:
+    """
+    Canonical metadata key of a temporal field, resolved through
+    SEARCH_FIELDS rather than derived from the last path segment.
+
+    Truncating collapsed distinct properties -- `temporal.dublincore.created`
+    and `temporal.extensions.created` both became "created". The namespaced
+    key keeps them apart.
+    """
+    registry_field = range_field_by_es_path(field)
+
+    if registry_field is not None:
+        return registry_field.key
+
+    # Temporal fields are discovered from the mapping, so a field may
+    # legitimately have no registry entry yet. Fall back on the same
+    # derivation and flag it: it means SEARCH_FIELDS needs an entry.
+    key = metadata_key_from_path(field)
+
+    logger.warning(
+        "Temporal field %r is not declared in SEARCH_FIELDS; "
+        "derived its key as %r.",
+        field,
+        key
+    )
+
+    return key
 
 
 def build_temporal_aggs(
@@ -232,7 +271,7 @@ def extract_temporal_facets(
         #     }
 
         facets.append({
-            "id": field.split(".")[-1],
+            "key": temporal_key(field),
             "label": default_label(field),
             "field": field,
             "start_field": field + "_start",

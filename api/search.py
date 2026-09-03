@@ -6,6 +6,7 @@ from flask import Response, request, current_app
 
 from .temporal import (
     get_temporal_fields,
+    temporal_key,
     build_temporal_aggs,
     extract_temporal_facets,
     build_open_range,
@@ -348,7 +349,8 @@ def register_search_endpoint(
         )
 
         # Temporal facets explicitly disabled by the client
-        # (searchConfig.temporalFacets, entries with "enabled": false).
+        # (searchConfig.temporalFacets, entries with "enabled": false),
+        # designated by their canonical key -- `dublinCore.created`.
         # Same declarative semantics as excludeFacets below: a facet that
         # is not declared is still computed and returned, and the front
         # displays it with its default label. Declaring an entry therefore
@@ -366,10 +368,11 @@ def register_search_endpoint(
 
             temporal_fields = [
                 f for f in temporal_fields
-                if f.split(".")[-1] not in excluded_temporal
+                if temporal_key(f) not in excluded_temporal
             ]
 
-        # Metadata facets (searchConfig.facets on the front side).
+        # Metadata facets (searchConfig.facets on the front side),
+        # designated by their canonical key -- `dublinCore.creator`.
         # This mirrors the exact semantics of the front rendering, which is
         # an explicit EXCLUSION: a facet missing from the config is still
         # displayed. The client therefore sends the disabled facets, not

@@ -22,6 +22,39 @@ class SearchFieldFamily(str, Enum):
     THUNDERDOTS = "thunderdots"
 
 
+# Index paths are lowercased; configurations and DTS payloads use the
+# camelCase spelling. Only this namespace needs restoring -- `extensions`
+# and the root-level properties are already spelled the same way.
+NAMESPACE_KEYS = {
+    "dublincore": "dublinCore",
+}
+
+
+def metadata_key_from_path(path: str) -> str:
+    """
+    Turn an index path into its canonical metadata key.
+
+        dublincore.created                    -> dublinCore.created
+        temporal.dublincore.created           -> dublinCore.created
+        temporal.temporal.dublincore.created  -> dublinCore.created
+        extensions.dateCreated                -> extensions.dateCreated
+        title                                 -> title
+
+    Leading `temporal.` segments are index plumbing and never belong to the
+    key: the same property is one key whether it is read as a value or
+    aggregated as a range.
+    """
+    while path.startswith("temporal."):
+        path = path.removeprefix("temporal.")
+
+    head, separator, tail = path.partition(".")
+
+    if not separator:
+        return path
+
+    return f"{NAMESPACE_KEYS.get(head, head)}{separator}{tail}"
+
+
 @dataclass(frozen=True)
 class SearchField:
 
@@ -40,6 +73,29 @@ class SearchField:
 
     range_start: Optional[str] = None
     range_end: Optional[str] = None
+
+    @property
+    def key(self) -> str:
+        """
+        Canonical metadata key: the DTS path of the property, as an editor
+        writes it in a collection configuration (`columns`, `facets`,
+        `temporalFacets`).
+
+        This is the abstraction layer over the index structure. It is
+        namespaced, so it never collapses two distinct properties the way a
+        bare last segment does -- `dublinCore.created` and
+        `extensions.dateCreated` stay distinct.
+
+        Derived from `path`:
+            dublincore.created           -> dublinCore.created
+            temporal.dublincore.created  -> dublinCore.created
+            extensions.dateCreated       -> extensions.dateCreated
+            title                        -> title
+
+        A range facet shares the key of the property it covers; the two are
+        told apart by `is_range_facet`, not by their key.
+        """
+        return metadata_key_from_path(self.path)
 
     @property
     def is_range_facet(self) -> bool:
@@ -780,7 +836,7 @@ def build_searchfield_aggs(exclude_ids: set[str] | None = None):
         if field.type != SearchFieldType.KEYWORD:
             continue
 
-        if exclude_ids and field.id in exclude_ids:
+        if matches_field(field, exclude_ids):
             continue
 
         aggs[field.id] = {
@@ -800,18 +856,64 @@ def build_searchfield_aggs(exclude_ids: set[str] | None = None):
 
     return aggs
 
+def range_field_by_es_path(es_path: str):
+    """
+    Resolve a temporal field discovered in the Elasticsearch mapping.
+
+    The mapping exposes `temporal.temporal.dublincore.created`, while the
+    registry stores the inner path `temporal.dublincore.created`, so both
+    spellings are tried.
+    """
+    candidates = (es_path, es_path.removeprefix("temporal."))
+
+    for candidate in candidates:
+        for field in SEARCH_FIELDS:
+            if field.is_range_facet and field.path == candidate:
+                return field
+
+    return None
+
+
+def resolve_field(name: str, range_facet: bool | None = None):
+    """
+    Look a field up by its canonical metadata key.
+
+    `range_facet` disambiguates the two entries that share a key: pass True
+    for the temporal range facet, False for the plain property, None when
+    either will do.
+    """
+    candidates = SEARCH_FIELDS
+
+    if range_facet is not None:
+        candidates = [
+            f for f in SEARCH_FIELDS
+            if f.is_range_facet is range_facet
+        ]
+
+    for field in candidates:
+        if field.key == name:
+            return field
+
+    return None
+
+
+def matches_field(field: SearchField, names) -> bool:
+    """
+    True when `names` designates `field` by its canonical key.
+    """
+    return bool(names) and field.key in names
+
+
 def get_facet_es_field(facet_id):
 
     # Facette spéciale collections
     if facet_id == "collections":
         return "collection_facets"
 
-    # Toutes les autres facettes configurées
-    for field in SEARCH_FIELDS:
+    field = resolve_field(facet_id)
 
-        if field.id == facet_id:
-
-            return get_es_field(field)
+    if field is not None:
+        return get_es_field(field)
 
     raise ValueError(
         f"Unknown facet field {facet_id}"
@@ -831,12 +933,15 @@ def extract_searchfield_facets(aggregations, exclude_ids: set[str] | None = None
         if not field.facet or field.is_range_facet:
             continue
 
-        if exclude_ids and field.id in exclude_ids:
+        if matches_field(field, exclude_ids):
             continue
 
         buckets = aggregations.get(field.id, {}).get("buckets", [])
 
-        facets[field.id] = [
+        # The aggregation is named after the internal id, but the facet is
+        # published under its canonical key: that is the only vocabulary a
+        # configuration should ever need to know about.
+        facets[field.key] = [
             {
                 "value": bucket["key"],
                 "count": bucket["resource_count"]["value"]
