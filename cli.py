@@ -2366,7 +2366,7 @@ async def dotsplorer(app, collections, _index_name):
         print("Building Thunderdots global graph...")
 
         td = ThunderDots(
-            endpoint_dts="https://dev.chartes.psl.eu/dots/api/dts",
+            endpoint_dts=app.config['DTS_URL'],
             collection_params={
                 "collection_id": app.config['TARGET_COLLECTION'],
                 "metadata_dublincore": None,
