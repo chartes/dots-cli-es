@@ -1184,6 +1184,22 @@ def sanitize_resource_metadata(
 
     return cleaned
 
+def sanitize_collection_metadata(
+    collection_metadata: dict
+):
+    """
+    Removes keys not expected for ES collections.
+    """
+
+    cleaned = dict(collection_metadata)
+
+    cleaned.pop(
+        "fragments",
+        None
+    )
+
+    return cleaned
+
 #10juillet def sanitize_resource_metadata(resource_metadata: dict) -> dict:
 #     """
 #     Return a clean copy of resource_metadata without heavy/internal fields.
@@ -1638,7 +1654,7 @@ async def index_collection(app, collection_metadata):
     # Write collection metadata to JSONL
     try:
         with open(collection_jsonl_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(collection_metadata) + '\n')
+            f.write(json.dumps(sanitize_collection_metadata(collection_metadata)) + '\n')
         print(f"Collection indexed and added to {collection_jsonl_path}")
 
         # Update the stats for indexed collections
@@ -2703,7 +2719,7 @@ def make_cli():
                         app.elasticsearch.index(
                             index=app.config["COLLECTION_INDEX"],
                             id=collection_es_id,
-                            body=collection
+                            body=sanitize_collection_metadata(collection)
                         )
                         app.index_stats["collections_indexed"] = app.index_stats.get("collections_indexed", 0) + 1
                     except Exception as e:
