@@ -194,38 +194,6 @@ def unflatten_dict(data):
     return result
 
 
-def default_label(field: str) -> str:
-    """
-    Transforme un champ Elasticsearch en libellé technique.
-
-    Exemples :
-        temporal.dublincore.created
-            -> dct:created
-
-        temporal.extensions.datePublished
-            -> schema:datePublished
-
-        temporal.custom.myDate
-            -> custom:myDate
-    """
-
-    parts = field.split(".")
-
-    if len(parts) < 3:
-        return field
-
-    namespace = parts[-2]
-    property_name = parts[-1]
-
-    namespace_map = {
-        "dublincore": "dct",
-        "extensions": "schema",
-    }
-
-    prefix = namespace_map.get(namespace, namespace)
-
-    return f"{prefix}:{property_name}"
-
 def extract_temporal_facets(
     aggregations: dict,
     temporal_fields: list[str]
@@ -272,7 +240,11 @@ def extract_temporal_facets(
 
         facets.append({
             "key": temporal_key(field),
-            "label": default_label(field),
+            # Fallback label: the canonical key itself, so a collection with
+            # no configured label displays exactly the string an editor has
+            # to paste into searchConfig.temporalFacets to customise it.
+            # Term facets already fall back the same way, on their key.
+            "label": temporal_key(field),
             "field": field,
             "start_field": field + "_start",
             "end_field": field + "_end",

@@ -540,252 +540,133 @@ SEARCH_FIELDS = [
 
 ]
 
-# SEARCH_FIELDS = [
-#
-#     # ==========================================================
-#     # CLI / Elasticsearch (générés par le CLI)
-#     # ==========================================================
-#
-#     SearchField("cli:parent",      "parent_id",  "cli", "keyword"),
-#     SearchField("cli:path",        "path",       "cli", "keyword"),
-#     SearchField("cli:pathIds",     "path_ids",   "cli", "keyword"),
-#     SearchField("cli:ancestors",   "ancestors",  "cli", "keyword"),
-#
-#
-#     # ==========================================================
-#     # DTS (racine)
-#     # ==========================================================
-#
-#     SearchField("dts:id",             "id",             "dts", "keyword"),
-#     SearchField("dts:type",           "type",           "dts", "keyword"),
-#
-#     SearchField("dts:title",          "title",          "dts", "text"),
-#     SearchField("dts:description",    "description",    "dts", "text"),
-#
-#     # SearchField("dts:dtsVersion",     "dtsVersion",     "dts", "keyword"),
-#
-#     # SearchField("dts:totalParents",   "totalParents",   "dts", "integer"),
-#     # SearchField("dts:totalChildren",  "totalChildren",  "dts", "integer"),
-#
-#     SearchField("dts:download",       "download",       "dts", "url"),
-#
-#     # SearchField("dts:collection",     "collection",     "dts", "keyword"),
-#     # SearchField("dts:navigation",     "navigation",     "dts", "keyword"),
-#     # SearchField("dts:document",       "document",       "dts", "keyword"),
-#
-#     # SearchField("dts:citationTrees",  "citationTrees",  "dts", "keyword"),
-#     # SearchField("dts:mediaTypes",     "mediaTypes",     "dts", "keyword"),
-#
-#     # SearchField("dts:@context",       "@context",       "dts", "keyword"),
-#
-#     # texte intégral produit par thunderdots
-#     SearchField(
-#         "content",
-#         "content",
-#         "thunderdots",
-#         "text",
-#         fulltext=True
-#     ),
-#
-#
-#     # ==========================================================
-#     # Dublin Core
-#     # ==========================================================
-#
-#     SearchField("dct:title",                    "dublincore.title",                    "dct", "text"),
-#     SearchField("dct:creator",                  "dublincore.creator",                  "dct", "keyword", facet=True),
-#
-#     SearchField("dct:created",                  "dublincore.created",                  "dct", "temporal"),
-#     SearchField("dct:issued",                   "dublincore.issued",                   "dct", "temporal"),
-#     SearchField("dct:coverage",                 "dublincore.coverage",                 "dct", "temporal"),
-#
-#     SearchField("dct:contributor",              "dublincore.contributor",              "dct", "keyword", facet=True),
-#     SearchField("dct:publisher",                "dublincore.publisher",                "dct", "keyword", facet=True),
-#     SearchField("dct:language",                 "dublincore.language",                 "dct", "keyword", facet=True),
-#
-#     SearchField("dct:description",              "dublincore.description",              "dct", "text"),
-#     SearchField("dct:source",                   "dublincore.source",                   "dct", "text"),
-#
-#     # SearchField("dct:identifier",               "dublincore.identifier",               "dct", "url"),
-#     SearchField("dct:isVersionOf",              "dublincore.isVersionOf",              "dct", "url"),
-#
-#     SearchField("dct:rights",                   "dublincore.rights",                   "dct", "text"),
-#     SearchField("dct:license",                  "dublincore.license",                  "dct", "url"),
-#
-#     SearchField("dct:relation",                 "dublincore.relation",                 "dct", "url"),
-#
-#     # SearchField("dct:bibliographicCitation",    "dublincore.bibliographicCitation",    "dct", "text"),
-#
-#
-#     # ==========================================================
-#     # Schema.org Extensions
-#     # ==========================================================
-#
-#     SearchField("schema:name",                  "extensions.name",                  "schema", "text"),
-#
-#     SearchField("schema:author",                "extensions.author",                "schema", "keyword", facet=True),
-#     SearchField("schema:editor",                "extensions.editor",                "schema", "keyword", facet=True),
-#     SearchField("schema:publisher",             "extensions.publisher",             "schema", "keyword", facet=True),
-#
-#     SearchField("schema:dateCreated",           "extensions.dateCreated",           "schema", "temporal"),
-#     SearchField("schema:datePublished",         "extensions.datePublished",         "schema", "temporal"),
-#     SearchField("schema:temporalCoverage",      "extensions.temporalCoverage",      "schema", "temporal"),
-#
-#     SearchField("schema:description",           "extensions.description",           "schema", "text"),
-#
-#     SearchField("schema:license",               "extensions.license",               "schema", "url"),
-#     SearchField("schema:isBasedOn",             "extensions.isBasedOn",             "schema", "url"),
-#     SearchField("schema:exampleOfWork",         "extensions.exampleOfWork",         "schema", "url"),
-#
-#     SearchField("schema:inLanguage",            "extensions.inLanguage",            "schema", "keyword", facet=True),
-#
-#     SearchField("schema:funder",                "extensions.funder",                "schema", "keyword", facet=True),
-#
-#     # SearchField("schema:encoding",              "extensions.encoding",              "schema", "keyword"),
-#     SearchField("schema:associatedMedia",       "extensions.associatedMedia",       "schema", "keyword"),
-#     SearchField("schema:subjectOf",             "extensions.subjectOf",             "schema", "keyword"),
-#     SearchField("schema:about",                 "extensions.about",                 "schema", "keyword"),
-#
-#     # SearchField("schema:creditText",            "extensions.creditText",            "schema", "text"),
-#
-#     # SearchField("schema:@context",              "extensions.@context",              "schema", "keyword"),
-#     SearchField("schema:@type",                 "extensions.@type",                 "schema", "keyword"),
-#
-#
-#     # ==========================================================
-#     # DoTS extensions
-#     # ==========================================================
-#
-#     SearchField(
-#         "dots:shortTitle",
-#         "extensions.dots:shortTitle",
-#         "dots",
-#         "text"
-#     ),
-#
-#     SearchField(
-#         "dots:resourceIIIFManifest",
-#         "extensions.dots:resourceIIIFManifest",
-#         "dots",
-#         "url"
-#     ),
-#]
 
 # ----------------------------------------------------------------------
-# Lookup tables
+# Registry accessors -- deliberately kept, commented out
+#
+# The two lookup tables below belong to get_search_field, their only
+# consumer, so they are commented out with it: left live they would be
+# built on every import for nothing. Uncomment them together.
+#
+# Read-only views over SEARCH_FIELDS: look a single field up, or list the
+# ones that are indexed, facetable, full-text searchable or temporal, or
+# group them by family or by type.
+#
+# Nothing calls them today. They are commented out rather than deleted
+# because they are not a stale duplicate of live code -- unlike the
+# temporal helpers that used to sit in this module -- but the exact shape a
+# future feature would need:
+#
+#   - an endpoint publishing the available fields, letting a client
+#     discover what a collection can be configured with;
+#   - a `manage.py fields` command listing the metadata keys an editor may
+#     put in a configuration (searchConfig.facets,
+#     searchConfig.temporalFacets, homePageSettings.listSection.columns).
+#
+# Uncomment what you need rather than rewriting it: these already agree
+# with the registry and with the canonical `key` vocabulary.
 # ----------------------------------------------------------------------
 
-SEARCH_FIELDS_BY_ID = {
-    field.id: field
-    for field in SEARCH_FIELDS
-}
+# SEARCH_FIELDS_BY_ID = {
+#     field.id: field
+#     for field in SEARCH_FIELDS
+# }
 
 
-SEARCH_FIELDS_BY_PATH = {
-    field.path: field
-    for field in SEARCH_FIELDS
-}
+# SEARCH_FIELDS_BY_PATH = {
+#     field.path: field
+#     for field in SEARCH_FIELDS
+# }
 
 
-def get_search_field(id_or_path: str) -> Optional[SearchField]:
-    """
-    Lookup by id first, then by path.
-    """
-    return (
-        SEARCH_FIELDS_BY_ID.get(id_or_path)
-        or SEARCH_FIELDS_BY_PATH.get(id_or_path)
-    )
+# def get_search_field(id_or_path: str) -> Optional[SearchField]:
+#     """
+#     Lookup by id first, then by path.
+#     """
+#     return (
+#         SEARCH_FIELDS_BY_ID.get(id_or_path)
+#         or SEARCH_FIELDS_BY_PATH.get(id_or_path)
+#     )
 
 
-# ----------------------------------------------------------------------
-# Field groups
-# ----------------------------------------------------------------------
+# # ----------------------------------------------------------------------
+# # Field groups
+# # ----------------------------------------------------------------------
 
-def indexed_fields():
-    """
-    Champs réellement indexés dans les métadonnées de recherche.
+# def indexed_fields():
+#     """
+#     Champs réellement indexés dans les métadonnées de recherche.
 
-    Les facettes temporelles range ne sont pas indexées ici :
-    elles utilisent directement les champs temporal.*_start/end
-    produits par Thunderdots.
-    """
-    return [
-        field
-        for field in SEARCH_FIELDS
-        if field.index
-        and not field.is_range_facet
-    ]
-
-
-def facet_fields():
-    """
-    Facettes classiques (keyword, listes, etc.).
-
-    Exclut les facettes temporelles range.
-    """
-    return [
-        field
-        for field in SEARCH_FIELDS
-        if field.facet
-        and not field.is_range_facet
-    ]
+#     Les facettes temporelles range ne sont pas indexées ici :
+#     elles utilisent directement les champs temporal.*_start/end
+#     produits par Thunderdots.
+#     """
+#     return [
+#         field
+#         for field in SEARCH_FIELDS
+#         if field.index
+#         and not field.is_range_facet
+#     ]
 
 
-def range_facet_fields():
-    """
-    Facettes temporelles utilisant un couple start/end.
-    """
-    return [
-        field
-        for field in SEARCH_FIELDS
-        if field.is_range_facet
-    ]
+# def facet_fields():
+#     """
+#     Facettes classiques (keyword, listes, etc.).
+
+#     Exclut les facettes temporelles range.
+#     """
+#     return [
+#         field
+#         for field in SEARCH_FIELDS
+#         if field.facet
+#         and not field.is_range_facet
+#     ]
 
 
-def fulltext_fields():
-    return [
-        field
-        for field in SEARCH_FIELDS
-        if field.fulltext
-    ]
+# def fulltext_fields():
+#     return [
+#         field
+#         for field in SEARCH_FIELDS
+#         if field.fulltext
+#     ]
 
 
-def temporal_fields():
-    """
-    Champs temporels métier.
+# def temporal_fields():
+#     """
+#     Champs temporels métier.
 
-    Exemple :
-        dct:created
-        schema:datePublished
+#     Exemple :
+#         dct:created
+#         schema:datePublished
 
-    Ce ne sont pas les champs utilisés pour les ranges.
-    """
-    return [
-        field
-        for field in SEARCH_FIELDS
-        if field.type == SearchFieldType.TEMPORAL
-        and not field.is_range_facet
-    ]
-
-
-def fields_by_family(
-    family: SearchFieldFamily
-):
-    return [
-        field
-        for field in SEARCH_FIELDS
-        if field.family == family
-    ]
+#     Ce ne sont pas les champs utilisés pour les ranges.
+#     """
+#     return [
+#         field
+#         for field in SEARCH_FIELDS
+#         if field.type == SearchFieldType.TEMPORAL
+#         and not field.is_range_facet
+#     ]
 
 
-def fields_by_type(
-    type_: SearchFieldType
-):
-    return [
-        field
-        for field in SEARCH_FIELDS
-        if field.type == type_
-    ]
+# def fields_by_family(
+#     family: SearchFieldFamily
+# ):
+#     return [
+#         field
+#         for field in SEARCH_FIELDS
+#         if field.family == family
+#     ]
+
+
+# def fields_by_type(
+#     type_: SearchFieldType
+# ):
+#     return [
+#         field
+#         for field in SEARCH_FIELDS
+#         if field.type == type_
+#     ]
 
 
 # ----------------------------------------------------------------------
@@ -968,141 +849,11 @@ def get_es_field(field: SearchField) -> str:
     return path
 
 
-
-# ----------------------------------------------------------------------
-# Temporal facets helpers
-# ----------------------------------------------------------------------
-
-def build_temporal_aggs(
-    fields: list[SearchField] | None = None
-) -> dict:
-    """
-    Construit les agrégations min/max pour les facettes temporelles.
-
-    Les champs sont déclarés dans SEARCH_FIELDS via :
-        range_start
-        range_end
-
-    Exemple :
-
-        range_start:
-            temporal.dublincore.coverage_start
-
-        range_end:
-            temporal.dublincore.coverage_end
-
-    Produit :
-
-        coverage_min
-        coverage_max
-    """
-
-    if fields is None:
-        fields = range_facet_fields()
-
-    aggs = {}
-
-    for field in fields:
-
-        key = field.id.replace(":", "__")
-
-        aggs[f"{key}_min"] = {
-            "min": {
-                "field": field.range_start
-            }
-        }
-
-        aggs[f"{key}_max"] = {
-            "max": {
-                "field": field.range_end
-            }
-        }
-
-    return aggs
-
-
-def default_label(
-    field: SearchField
-) -> str:
-    """
-    Retourne un label technique exploitable côté UI.
-
-    Exemple :
-
-        dct:created:range
-            -> dct:created
-
-        schema:datePublished:range
-            -> schema:datePublished
-    """
-
-    if field.id.endswith(":range"):
-        return field.id[:-6]
-
-    return field.id
-
-
-def extract_temporal_facets(
-    aggregations: dict,
-    fields: list[SearchField] | None = None,
-) -> list[dict]:
-    """
-    Reconstruit les facettes temporelles exploitables par le front.
-
-    Ignore les champs sans valeurs min/max.
-    """
-
-    if fields is None:
-        fields = range_facet_fields()
-
-    facets = []
-
-    for field in fields:
-
-        key = field.id.replace(":", "__")
-
-        min_bucket = aggregations.get(
-            f"{key}_min",
-            {}
-        )
-
-        max_bucket = aggregations.get(
-            f"{key}_max",
-            {}
-        )
-
-        min_value = min_bucket.get("value")
-        max_value = max_bucket.get("value")
-
-        if min_value is None or max_value is None:
-            continue
-
-        facets.append({
-
-            # identifiant front
-            "id": field.id,
-
-            # label humain
-            "label": default_label(field),
-
-            # groupe logique
-            "field": field.path,
-
-            # champs ES réellement filtrables
-            "start_field": field.range_start,
-            "end_field": field.range_end,
-
-            "min": int(min_value),
-            "max": int(max_value),
-        })
-
-    return facets
-
 def build_filtered_temporal_metadata(
     temporal_metadata: dict,
 ) -> dict:
     """
-    Filtre le temporal produit par Thunderdots.
+    Filtre le temporal produit par Thunderdots pour son indexation (CLI).
 
     Le temporal Thunderdots est sans préfixe "temporal.".
     Le contrat SearchField utilise les chemins ES complets.
