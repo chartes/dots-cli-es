@@ -493,13 +493,33 @@ def load_elastic_conf(app, index_name, rebuild=False):
                 print("UPDATE INDEX CONFIGURATION:", url)
                 with httpx.Client() as client:
                     res = client.put(url, json=payload)
-                    assert str(res.status_code).startswith("20")
+                    if not str(res.status_code).startswith("20"):
+                        try:
+                            error_type = res.json().get("error", {}).get("type", "")
+                        except Exception:
+                            error_type = ""
+
+                        if error_type == "resource_already_exists_exception":
+                            raise RuntimeError(
+                                f"❌ La configuration de {index_name} n'a PAS été appliquée : "
+                                f"l'index existe déjà. "
+                                f"Relancer avec --rebuild pour le supprimer puis le recréer "
+                                f"(⚠️ toutes les données de {index_name} seront perdues et à réindexer)."
+                            )
+
+                        raise RuntimeError(
+                            f"❌ La configuration de {index_name} n'a PAS été appliquée "
+                            f"(HTTP {res.status_code}) : {res.text}"
+                        )
 
     except FileNotFoundError as e:
         print(str(e))
         print("conf not found", flush=True, end=" ")
     except Exception as e:
-        print(res.text, str(e), flush=True, end=" ")
+        # Les RuntimeError levées ci-dessus portent déjà le corps de la réponse
+        if res is not None and not isinstance(e, RuntimeError):
+            print(res.text, flush=True, end=" ")
+        print(str(e), flush=True, end=" ")
         raise e
 
 def update_conf_internal(cli_ctx: CLIContext, indexes=None, rebuild=False):
@@ -515,6 +535,37 @@ def update_conf_internal(cli_ctx: CLIContext, indexes=None, rebuild=False):
         name = name.strip()
         if name:
             load_elastic_conf(app, name, rebuild=rebuild)
+
+def warn_on_mapping_drift(app, es, index_name):
+    """
+    Signale qu'un index existant ne porte pas le mapping de son fichier de conf.
+
+    Un index créé implicitement par un premier es.index() hérite du mapping
+    dynamique par défaut : chaque nouvelle clé d'objet (ex. members.<id>) devient
+    un champ, et l'index finit par heurter index.mapping.total_fields.limit (1000).
+    """
+    try:
+        with open(f'elasticsearch/{index_name}.conf.json', 'r') as f:
+            expected = json.load(f).get("mappings", {}).get("dynamic")
+    except FileNotFoundError:
+        return
+
+    if expected is None:
+        return
+
+    try:
+        live = es.indices.get_mapping(index=index_name)[index_name]["mappings"].get("dynamic")
+    except Exception as e:
+        print(f"⚠️ Impossible de lire le mapping de {index_name}: {e}")
+        return
+
+    if live != expected:
+        print(
+            f"⚠️ Index {index_name} : mapping 'dynamic={live or 'true (défaut ES)'}' en base alors que "
+            f"elasticsearch/{index_name}.conf.json attend 'dynamic={expected}'. "
+            f"La conf n'a jamais été appliquée à cet index."
+            f"`update-conf --indexes {index_name} --rebuild` (⚠️ réindexation nécessaire)."
+        )
 
 def normalize_extension_key(key: str) -> str:
     """
@@ -2488,6 +2539,7 @@ def make_cli():
         app = cli_ctx.app
         es = app.elasticsearch
         doc_index = app.config["DOCUMENT_INDEX"]
+        coll_index = app.config["COLLECTION_INDEX"]
 
         MERGE_COLLECTIONS_SCRIPT = """
         if (ctx._source.collections == null) {
@@ -2525,12 +2577,14 @@ def make_cli():
 
         # Indexation ES
         # try:
-        if not es.indices.exists(index=doc_index):
-            print(f"⚠️ Index {doc_index} not found → creating with correct mapping")
-            # Appel positionnel correct pour update_conf
-            update_conf_internal(cli_ctx, indexes=doc_index, rebuild=True)
-        else:
-            print(f"✅ Index {doc_index} exists, nothing to do for mapping")
+        for index_name in (doc_index, coll_index):
+            if not es.indices.exists(index=index_name):
+                print(f"⚠️ Index {index_name} not found → creating with correct mapping")
+                # Appel positionnel correct pour update_conf
+                update_conf_internal(cli_ctx, indexes=index_name, rebuild=True)
+            else:
+                print(f"✅ Index {index_name} exists, nothing to do for mapping")
+                warn_on_mapping_drift(app, es, index_name)
         # except Exception as e:
         #     print(f"❌ Erreur lors de la vérification ou création de l’index {doc_index}: {e}")
         #     return
