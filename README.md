@@ -61,6 +61,33 @@ Elasticsearch API to search the [DoTS collections & resources](https://dev.chart
   pip-compile --extra dev pyproject.toml -o requirements-dev.txt
   </code></pre>
 
+### Install thunderdots from a local directory (development)
+
+`thunderdots` is a runtime dependency of the indexing CLI. To develop on it
+locally, install it in editable mode from your local repository instead of
+PyPI. The local version must satisfy the specifier declared in `pyproject.toml`
+(currently `thunderdots>=0.1.dev,<0.2`).
+
+1. Install the package and its dependencies as usual:
+   <pre><code>
+   pip install -e . -r requirements-dev.txt
+   </code></pre>
+
+2. Override thunderdots with your local directory:
+   <pre><code>
+   pip install -e <b><i>path/to/thunderdots</i></b>
+   </code></pre>
+   Any change in the local repository is reflected immediately, without reinstalling.
+   :warning: The local version must satisfy the `thunderdots` specifier above. A
+   strict pin (e.g. `==0.1.6`) would conflict with a development snapshot such as
+   `0.1.dev37`.
+
+To check that thunderdots is installed from your local directory:
+
+<pre><code>
+pip list
+</code></pre>
+
 - For servers requiring uWSGI to run Python apps (remote Nginx servers):
   - check if uWSGI is installed `pip list --local`
   - install it in your virtual _**your_venv_name**_ if it's not: `pip install uwsgi`.
@@ -149,4 +176,3 @@ Commands:
   update-conf  Update the index configuration and mappings
 
 ```
-
