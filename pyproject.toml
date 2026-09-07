@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dots-es"
+version = "0.1.0"
+description = "DoTS Elasticsearch search API and indexing CLI"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "École nationale des chartes" }]
+dependencies = [
+    "click==8.1.7",
+    "elasticsearch==8.12.1",
+    "Flask==3.1.0",
+    "httpx==0.28.1",
+    "lxml==5.3.0",
+    "python-dotenv==1.0.1",
+    "requests==2.32.3",
+    "PyYAML==6.0.3",
+]
+
+[project.scripts]
+dots-es-cli = "dots_es.cli:main"
+dots-api = "dots_es.flask_app:main"
+
+[tool.setuptools]
+packages = ["dots_es", "dots_es.api"]
+
+[tool.setuptools.package-data]
+dots_es = ["config/*.yml", "elasticsearch/*.json"]

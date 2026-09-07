@@ -1,0 +1,4 @@
+-r requirements.txt
+build==1.2.2
+pytest==8.3.4
+wheel==0.45.1

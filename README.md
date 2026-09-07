@@ -1,4 +1,5 @@
 # The [DoTS search](https://dev.chartes.psl.eu/dots/api/dts/collection) API
+
 Elasticsearch API to search the [DoTS collections & resources](https://dev.chartes.psl.eu/dots/api/dts/collection).
 
 ![Static Badge](https://img.shields.io/badge/python-3.12-blue?style=for-the-badge&logo=python&label=PYTHON&color=blue)
@@ -12,9 +13,10 @@ Elasticsearch API to search the [DoTS collections & resources](https://dev.chart
 
 :warning: Use an ES version compatible with [requirements.txt](./requirements.txt)
 :information_source: Below commands are run independently/outside virtual environments (`deactivate`)
-  - Elasticsearch: refer to your organisation instructions or [Elasticsearch guidelines](https://www.elastic.co/guide/en/elasticsearch/reference/current/install-elasticsearch.html#elasticsearch-install-packages)
-  - [ICU plugin](https://www.elastic.co/guide/en/elasticsearch/plugins/current/analysis-icu.html): check if ICU is installed with `uconv -V`, otherwise:
-    <pre><code><b><i>path/to/elasticsearch_folder</i></b>/bin/elasticsearch-plugin install analysis-icu</code></pre>
+
+- Elasticsearch: refer to your organisation instructions or [Elasticsearch guidelines](https://www.elastic.co/guide/en/elasticsearch/reference/current/install-elasticsearch.html#elasticsearch-install-packages)
+- [ICU plugin](https://www.elastic.co/guide/en/elasticsearch/plugins/current/analysis-icu.html): check if ICU is installed with `uconv -V`, otherwise:
+  <pre><code><b><i>path/to/elasticsearch_folder</i></b>/bin/elasticsearch-plugin install analysis-icu</code></pre>
 
 - With docker (security disabled)
     <pre><code>
@@ -22,8 +24,6 @@ Elasticsearch API to search the [DoTS collections & resources](https://dev.chart
       docker exec <b><i>dots-es</i></b> bash -c "bin/elasticsearch-plugin install analysis-icu"
       docker restart <b><i>dots-es</i></b>
     </code></pre>
-
-
 
 ## Install
 
@@ -35,6 +35,7 @@ Elasticsearch API to search the [DoTS collections & resources](https://dev.chart
 </code>
 </pre>
 - Ensure you are running Python 3.12, for example with pyenv:
+
   ```bash
   pyenv shell 3.12
   ```
@@ -44,14 +45,20 @@ Elasticsearch API to search the [DoTS collections & resources](https://dev.chart
   cd <b><i>path/to/projects_folder</i></b>/dots-cli-es
   python3 -m venv <b><i>your_venv_name</i></b>
   source <b><i>your_venv_name</i></b>/bin/activate
-  pip install -r requirements.txt
+  pip install .
+  </code></pre>
+
+  This installs the `dots-es` package plus the `dots-es-cli` and `dots-api` console scripts.
+  For development (editable install + dev tools):
+  <pre><code>
+  pip install -e . -r requirements-dev.txt
   </code></pre>
 
 - For servers requiring uWSGI to run Python apps (remote Nginx servers):
   - check if uWSGI is installed `pip list --local`
-  - install it in your virtual *__your_venv_name__* if it's not: `pip install uwsgi`.
-  The WSGI application is located at `flask_app:flask_app`
-  *NB : this command may require wheel:*
+  - install it in your virtual _**your_venv_name**_ if it's not: `pip install uwsgi`.
+    The WSGI application is located at `flask_app:flask_app`
+    _NB : this command may require wheel:_
     - to check whether wheel is installed: `pip show wheel`
     - to install it if required: `pip install wheel`
 
@@ -71,7 +78,7 @@ Elasticsearch API to search the [DoTS collections & resources](https://dev.chart
 ### Initial indexing (and reindexing without configuration changes):
 
 <pre><code>
-(ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) python3 manage.py (--config=<b><i>local/staging/prod</i></b>) index (--years <b><i>"YYYY-YYYY"</i></b>)
+(ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) dots-es-cli (--config=<b><i>local/staging/prod</i></b>) index (--years <b><i>"YYYY-YYYY"</i></b>)
 </code></pre>
 
 When the index doesn't exist it is created according to the project ES [configuration files](./elasticsearch/).
@@ -81,8 +88,9 @@ When the index doesn't exist it is created according to the project ES [configur
 This operation will delete the pre-existing index.
 
 <pre><code>
-(ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) python3 manage.py (--config=<b><i>local/staging/prod</i></b>) update-conf --rebuild --indexes=<b><i>dots_document/dots_collection</i></b>
+(ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) dots-es-cli (--config=<b><i>local/staging/prod</i></b>) update-conf --rebuild --indexes=<b><i>dots_document/dots_collection</i></b>
 </code></pre>
+
 The above command updates the indexes according to the project ES [configuration files](./elasticsearch/).
 
 ### Check created indexes:
@@ -103,25 +111,24 @@ curl http://elastic:<b><i>ELASTIC_PASSWORD</i></b>@localhost:9200/_cat/indices?v
 
 > :warning: Below commands are mainly for local launch.
 > For servers, apps may be started via processes management tools, refer to the servers documentation
-  - Reactivate the virtual environment if needed (<code>source <b><i>your_venv_name</i></b>/bin/activate</code>)
-  - Launch:
-  from the subfolder containing flask_app.py (<code>cd <b><i>path/to/dots-cli-es</i></b></code>)
-    <code>(ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) python3 flask_app.py</code>
-  - Then visit http://localhost:5003/api/1.0/search?query=*&index=dots_document to test it is running
 
-
+- Reactivate the virtual environment if needed (<code>source <b><i>your_venv_name</i></b>/bin/activate</code>)
+- Launch:
+  <code>(ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) dots-api</code> (or <code>python3 flask_app.py</code>)
+- Then visit http://localhost:5003/api/1.0/search?query=\*&index=dots_document to test it is running
 
 ## Launch the front-end:
+
 - [Front-end's Readme](https://github.com/chartes/dots-vue)
 
 ---
+
 Additional details for offline commands:
 
-
 ```bash
-python3 manage.py --help
+dots-es-cli --help
 
-Usage: manage.py [OPTIONS] COMMAND [ARGS]...
+Usage: dots-es-cli [OPTIONS] COMMAND [ARGS]...
 
 Options:
   --config [local|staging|prod]  select appropriate .env file to use
@@ -135,3 +142,4 @@ Commands:
   update-conf  Update the index configuration and mappings
 
 ```
+
