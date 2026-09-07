@@ -1,4 +1,4 @@
-from cli import make_cli
+from dots_es.cli import make_cli
 
 cli = make_cli()
 

@@ -1,4 +1,5 @@
 import os
+from importlib import resources
 from typing import Any
 
 import yaml
@@ -53,12 +54,12 @@ def load_config(alias: str) -> dict:
     :rtype: dict
     :raises FileNotFoundError: if the YAML config file does not exist
     """
-    config_path = os.path.join("config", f"{alias}.yml")
+    config_path = resources.files("dots_es") / "config" / f"{alias}.yml"
 
-    if not os.path.isfile(config_path):
+    if not config_path.is_file():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with open(config_path, "r", encoding="utf-8") as f:
+    with config_path.open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     # Replace None values with empty strings

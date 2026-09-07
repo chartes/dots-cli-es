@@ -1,6 +1,6 @@
 from elasticsearch import Elasticsearch
 from flask import Flask, Blueprint
-from config_loader import load_config
+from dots_es.config_loader import load_config
 
 api_bp = Blueprint('api_bp', __name__)
 
@@ -36,7 +36,7 @@ def create_app(config_name: str):
 
     with app.app_context():
         # Import and register search endpoint
-        from api.search import register_search_endpoint
+        from dots_es.api.search import register_search_endpoint
 
         def compose_result(search_result):
             results = []

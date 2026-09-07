@@ -6,6 +6,7 @@ import csv
 from datetime import datetime, timezone
 import time
 from typing import Any, Optional
+from importlib import resources
 
 import click
 import httpx
@@ -13,9 +14,9 @@ import asyncio
 from elasticsearch import Elasticsearch
 from lxml import etree
 
-from config_loader import load_config
+from dots_es.config_loader import load_config
 
-from api.search_fields import SEARCH_FIELDS, SearchField, get_value, SearchFieldFamily, build_filtered_temporal_metadata
+from dots_es.api.search_fields import SEARCH_FIELDS, SearchField, get_value, SearchFieldFamily, build_filtered_temporal_metadata
 
 
 # ============================================================
@@ -484,10 +485,10 @@ def load_elastic_conf(app, index_name, rebuild=False):
             print(f"Deleting {index_name} index.")
             with httpx.Client() as client:
                 res = client.delete(url)
-        with open('elasticsearch/_global.conf.json', 'r') as _global:
+        with resources.files("dots_es").joinpath("elasticsearch", "_global.conf.json").open('r') as _global:
             global_settings = json.load(_global)
 
-            with open(f'elasticsearch/{index_name}.conf.json', 'r') as f:
+            with resources.files("dots_es").joinpath("elasticsearch", f"{index_name}.conf.json").open('r') as f:
                 payload = json.load(f)
                 payload["settings"] = global_settings
                 print("UPDATE INDEX CONFIGURATION:", url)
@@ -2749,5 +2750,11 @@ def make_cli():
     cli.add_command(search)
     return cli
 
-if __name__ == "__main__":
+
+def main():
+    """Console entry point for the DoTS indexing CLI."""
     make_cli()()
+
+
+if __name__ == "__main__":
+    main()

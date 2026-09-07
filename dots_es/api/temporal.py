@@ -2,7 +2,7 @@ import logging
 
 from functools import lru_cache
 
-from .search_fields import (
+from dots_es.api.search_fields import (
     metadata_key_from_path,
     range_field_by_es_path
 )

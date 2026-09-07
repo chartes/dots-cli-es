@@ -4,7 +4,7 @@ import time
 from typing import Callable
 from flask import Response, request, current_app
 
-from .temporal import (
+from dots_es.api.temporal import (
     get_temporal_fields,
     temporal_key,
     build_temporal_aggs,
@@ -13,7 +13,7 @@ from .temporal import (
     unflatten_dict
 )
 
-from .search_fields import (
+from dots_es.api.search_fields import (
     build_searchfield_aggs,
     extract_searchfield_facets,
     get_facet_es_field,
