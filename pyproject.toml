@@ -11,14 +11,23 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "École nationale des chartes" }]
 dependencies = [
-    "click==8.1.7",
-    "elasticsearch==8.12.1",
-    "Flask==3.1.0",
-    "httpx==0.28.1",
-    "lxml==5.3.0",
-    "python-dotenv==1.0.1",
-    "requests==2.32.3",
-    "PyYAML==6.0.3",
+    "click",
+    "elasticsearch>=8,<9",
+    "Flask",
+    "httpx",
+    "lxml",
+    "python-dotenv",
+    "requests",
+    "PyYAML",
+    "thunderdots>=0.1.dev,<0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "pip-tools",
+    "pytest",
+    "wheel",
 ]
 
 [project.scripts]

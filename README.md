@@ -54,6 +54,13 @@ Elasticsearch API to search the [DoTS collections & resources](https://dev.chart
   pip install -e . -r requirements-dev.txt
   </code></pre>
 
+- The `requirements*.txt` files are **generated**, not edited by hand. Dependencies are
+  declared in `pyproject.toml` and compiled with `pip-tools`:
+  <pre><code>
+  pip-compile pyproject.toml -o requirements.txt
+  pip-compile --extra dev pyproject.toml -o requirements-dev.txt
+  </code></pre>
+
 - For servers requiring uWSGI to run Python apps (remote Nginx servers):
   - check if uWSGI is installed `pip list --local`
   - install it in your virtual _**your_venv_name**_ if it's not: `pip install uwsgi`.
