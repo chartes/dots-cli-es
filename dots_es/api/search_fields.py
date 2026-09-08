@@ -559,7 +559,7 @@ SEARCH_FIELDS = [
 #
 #   - an endpoint publishing the available fields, letting a client
 #     discover what a collection can be configured with;
-#   - a `manage.py fields` command listing the metadata keys an editor may
+#   - a `dots-es-cli fields` command listing the metadata keys an editor may
 #     put in a configuration (searchConfig.facets,
 #     searchConfig.temporalFacets, homePageSettings.listSection.columns).
 #
