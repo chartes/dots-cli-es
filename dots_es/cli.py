@@ -2467,7 +2467,7 @@ def make_cli():
     """
 
     @click.group()
-    @click.option('--config', default="staging", type=click.Choice(["local", "staging", "prod"]), help="select appropriate .env file to use", show_default=True)
+    @click.option('--config', default="staging", type=click.Choice(["local", "staging", "prod"]), help="select appropriate .yml file to use", show_default=True)
     @click.pass_context
     def cli(ctx, config):
         config_dict = load_config(config)

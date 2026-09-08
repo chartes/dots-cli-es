@@ -165,7 +165,7 @@ dots-es-cli --help
 Usage: dots-es-cli [OPTIONS] COMMAND [ARGS]...
 
 Options:
-  --config [local|staging|prod]  select appropriate .env file to use
+  --config [local|staging|prod]  select appropriate .yml file to use
                                  [default: staging]
   --help                         Show this message and exit.
 

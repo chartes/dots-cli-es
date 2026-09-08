@@ -16,7 +16,6 @@ dependencies = [
     "Flask",
     "httpx",
     "lxml",
-    "python-dotenv",
     "requests",
     "PyYAML",
     "thunderdots>=0.1.dev,<0.2",
