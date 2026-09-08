@@ -13,7 +13,12 @@ from .temporal import (
     unflatten_dict
 )
 
-from .search_fields import build_searchfield_aggs, extract_searchfield_facets, get_facet_es_field
+from .search_fields import (
+    build_searchfield_aggs,
+    extract_searchfield_facets,
+    get_facet_es_field,
+    resolve_sort_field
+)
 
 def build_collection_facet(scope_collection_id):
     return {
@@ -446,10 +451,22 @@ def register_search_endpoint(
         if "sort" in request.args:
             for criteria in request.args["sort"].split(','):
                 sort_order = "asc"
+                criteria = criteria.strip()
                 if criteria.startswith('-'):
                     sort_order = "desc"
                     criteria = criteria[1:]
-                sort_criteriae.append({criteria: {"order": sort_order}})
+                if not criteria:
+                    continue
+                # Sort criteria mapped to sortable ES field
+                # ES `.sort` order accented chars with their based letters
+                # Dates are sorted against normalized temporal (start) bound, not the raw value
+                sort_criteriae.append({
+                    resolve_sort_field(criteria): {
+                        "order": sort_order,
+                        # Missing metadata pushed to the end of sorted results
+                        "missing": "_last"
+                    }
+                })
 
         r = {}
 

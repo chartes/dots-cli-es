@@ -833,20 +833,123 @@ def extract_searchfield_facets(aggregations, exclude_ids: set[str] | None = None
     return facets
 
 
+# Property families indexed under `resource_metadata`,
+# and therefore covered by the `resource_metadata.*`
+# dynamic template from `dots_document.conf.json`.
+METADATA_FAMILIES = (
+    SearchFieldFamily.DCT,
+    SearchFieldFamily.SCHEMA,
+    SearchFieldFamily.DOTS,
+)
+
+
+# Sortable property families. Sorting always applies to Resources, whether
+# queried directly or rebuilt by collapsing fragments. Their properties,
+# including DTS fields, are indexed under `resource_metadata`.
+# The root `title` belongs to the fragment, not the Resource: never sorted on
+SORTABLE_FAMILIES = METADATA_FAMILIES + (SearchFieldFamily.DTS,)
+
+
+def get_es_path(field: SearchField) -> str:
+    """
+    Index field path, without a sub-field.
+    """
+    if field.family in METADATA_FAMILIES:
+        return f"resource_metadata.{field.path}"
+
+    return field.path
+
+
 def get_es_field(field: SearchField) -> str:
-    if field.family in (
-        SearchFieldFamily.DCT,
-        SearchFieldFamily.SCHEMA,
-        SearchFieldFamily.DOTS,
-    ):
-        path = f"resource_metadata.{field.path}"
-    else:
-        path = field.path
+    path = get_es_path(field)
 
     if field.type == SearchFieldType.KEYWORD:
         path += ".keyword"
 
     return path
+
+
+def get_es_sort_field(field: SearchField) -> Optional[str]:
+    """
+    ES field to sort this SearchField on, or `None` if it is not sortable.
+
+    Sorting never uses `.keyword`: its terms are raw, so accented values
+    are not ordered with their base letter. The `.sort` sub-field uses the
+    `sortable` normalizer (lowercase + asciifolding) for consistent ordering.
+    It is `index: false`; doc_values are sufficient for sorting.
+    """
+    if field.type == SearchFieldType.TEMPORAL:
+        # Dates are sorted by their numeric start bound, never by the original
+        # string (`"1245-1250"`). The bound is stored in the range entry sharing
+        # the field's key.
+
+        range_field = (
+            field
+            if field.is_range_facet
+            else resolve_field(field.key, range_facet=True)
+        )
+
+        if range_field is None:
+            return None
+
+        # The registry stores the internal path; the mapping exposes these fields
+        # under `temporal.` — see `range_field_by_es_path`.
+        return f"temporal.{range_field.range_start}"
+
+    # URL included: these are strings, indexed like any other by the dynamic
+    # templates, and so carry the same `sort` sub-field.
+    if field.type in (
+        SearchFieldType.TEXT,
+        SearchFieldType.KEYWORD,
+        SearchFieldType.URL,
+    ):
+        if field.family in SORTABLE_FAMILIES:
+            return f"resource_metadata.{field.path}.sort"
+
+        # content, path_ids, ancestors...: no `sort` sub-field, and no
+        # meaning as a sort criterion either.
+        return None
+
+    if field.type == SearchFieldType.INTEGER:
+        return get_es_path(field)
+
+    return None
+
+
+def resolve_sort_field(criteria: str) -> str:
+    """
+    Translate a sort criterion received from the client into an ES field.
+
+    Two vocabularies are accepted:
+
+        dublinCore.title                            (canonical key)
+        resource_metadata.dublincore.title.keyword  (raw ES path)
+
+    and both resolve to:
+
+        resource_metadata.dublincore.title.sort
+
+    An unresolved criterion is returned unchanged: the historical
+    behaviour, leaving ES to report an unknown field.
+    """
+    field = resolve_field(criteria)
+
+    if field is not None:
+        es_field = get_es_sort_field(field)
+
+        if es_field is not None:
+            return es_field
+
+    # Raw ES path. The `.keyword` suffix attests to a string field, hence to
+    # the `.sort` sub-field beside it; without it nothing is rewritten, so as
+    # never to invent a `.sort` on a numeric field.
+    if criteria.endswith(".keyword"):
+        base = criteria[: -len(".keyword")]
+
+        if base.startswith(("resource_metadata.", "fragment_metadata.")):
+            return f"{base}.sort"
+
+    return criteria
 
 
 def build_filtered_temporal_metadata(

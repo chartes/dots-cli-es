@@ -49,6 +49,12 @@
               "keyword": {
                 "type": "keyword",
                 "ignore_above": 256
+              },
+              "sort": {
+                "type": "keyword",
+                "normalizer": "sortable",
+                "ignore_above": 256,
+                "index": false
               }
             }
           }
@@ -66,6 +72,12 @@
               "keyword": {
                 "type": "keyword",
                 "ignore_above": 256
+              },
+              "sort": {
+                "type": "keyword",
+                "normalizer": "sortable",
+                "ignore_above": 256,
+                "index": false
               }
             }
           }
