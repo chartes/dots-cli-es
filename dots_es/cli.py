@@ -546,7 +546,10 @@ def warn_on_mapping_drift(app, es, index_name):
     un champ, et l'index finit par heurter index.mapping.total_fields.limit (1000).
     """
     try:
-        with open(f'elasticsearch/{index_name}.conf.json', 'r') as f:
+        conf = resources.files("dots_es").joinpath(
+            "elasticsearch", f"{index_name}.conf.json"
+        )
+        with conf.open('r') as f:
             expected = json.load(f).get("mappings", {}).get("dynamic")
     except FileNotFoundError:
         return
@@ -563,7 +566,7 @@ def warn_on_mapping_drift(app, es, index_name):
     if live != expected:
         print(
             f"⚠️ Index {index_name} : mapping 'dynamic={live or 'true (défaut ES)'}' en base alors que "
-            f"elasticsearch/{index_name}.conf.json attend 'dynamic={expected}'. "
+            f"dots_es/elasticsearch/{index_name}.conf.json attend 'dynamic={expected}'. "
             f"La conf n'a jamais été appliquée à cet index."
             f"`update-conf --indexes {index_name} --rebuild` (⚠️ réindexation nécessaire)."
         )
