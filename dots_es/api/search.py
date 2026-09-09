@@ -334,6 +334,26 @@ def extract_highlight_patterns(query: str):
     return patterns
 
 
+def is_collection_indexed(index: str, collection_id: str) -> bool:
+    """
+    Check if there is at least one resource indexed for the scope collection
+    Identify difference between "has not yet been indexed" vs. "ho results for a search"
+    which the frontend can't efficiently resolve
+    """
+    result = current_app.elasticsearch.count(
+        index=index,
+        body={
+            "query": {
+                "term": {
+                    "resource_metadata.path_ids.keyword": collection_id
+                }
+            }
+        }
+    )
+
+    return result["count"] > 0
+
+
 def register_search_endpoint(
     app,
     api_version="1.0",
@@ -927,7 +947,13 @@ def register_search_endpoint(
                     "temporal": temporal_facets
                 }
 
-
+            # Collection index check common to 3 possible responses:
+            # None when no collection_id has been provided, which is irrelevant
+            r["collection_indexed"] = (
+                is_collection_indexed(index, collection_id)
+                if collection_id
+                else None
+            )
 
             r["duration"] = float('%.4f' % (time.time() - start_time))
 
