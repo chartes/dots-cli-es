@@ -27,11 +27,19 @@
     "char_filter": {
       "html_stripper": {
         "type": "html_strip"
+      },
+      "strip_leading_punctuation": {
+        "type": "pattern_replace",
+        "pattern": "^[^\\p{L}\\p{N}]+",
+        "replacement": ""
       }
     },
     "normalizer": {
       "sortable": {
         "type": "custom",
+        "char_filter": [
+          "strip_leading_punctuation"
+        ],
         "filter": [
           "lowercase",
           "asciifolding"
