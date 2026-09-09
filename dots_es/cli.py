@@ -2258,15 +2258,6 @@ async def crawl_collection(app, collection_id: str, collection_index: str, targe
             tasks.append(crawl_branch(app, chain, chain_label, collection_index, target_collections, visited, semaphore, resource_queue, parent_id, parent_path, parent_path_ids))
         await asyncio.gather(*tasks)
 
-        await resource_queue.join()
-
-        for _ in workers:
-            await resource_queue.put(None)
-
-        await asyncio.gather(*workers)
-
-        await client.aclose()
-
     else:
         # Full tree crawl
         await crawl_branch(
@@ -2282,6 +2273,16 @@ async def crawl_collection(app, collection_id: str, collection_index: str, targe
             parent_path=None,
             parent_path_ids=None
         )
+
+    await resource_queue.join()
+
+    for _ in workers:
+        await resource_queue.put(None)
+
+    await asyncio.gather(*workers)
+
+    await client.aclose()
+
 
 async def dotsplorer(app, collections, _index_name):
     """
