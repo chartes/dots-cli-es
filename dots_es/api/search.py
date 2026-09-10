@@ -334,6 +334,28 @@ def extract_highlight_patterns(query: str):
     return patterns
 
 
+def build_facet_clause(es_field: str, values: list) -> dict:
+    """
+    ES facet clause for several values on single facet, combined with AND
+
+    `terms` is an OR logic: on a multivalued field as dublincore.creator,
+    it would select docs pertaining to one or the other 'creator'
+    We intend to restrict to docs where authors are co-authors :
+    one term per value, all mandatory.
+    """
+    if len(values) == 1:
+        return {"term": {es_field: values[0]}}
+
+    return {
+        "bool": {
+            "must": [
+                {"term": {es_field: value}}
+                for value in values
+            ]
+        }
+    }
+
+
 def is_collection_indexed(index: str, collection_id: str) -> bool:
     """
     Check if there is at least one resource indexed for the scope collection
@@ -542,7 +564,7 @@ def register_search_endpoint(
                             continue
 
                         es_field = get_facet_es_field(facet_field)
-                        clause = {"terms": {es_field: values}}
+                        clause = build_facet_clause(es_field, values)
 
                         if facet_field == "collections":
                             collection_filters.append(clause)
@@ -751,11 +773,7 @@ def register_search_endpoint(
 
                         es_field = get_facet_es_field(facet_field)
 
-                        clause = {
-                            "terms": {
-                                es_field: values
-                            }
-                        }
+                        clause = build_facet_clause(es_field, values)
 
                         if facet_field == "collections":
                             collection_filters.append(clause)
