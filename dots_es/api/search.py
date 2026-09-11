@@ -75,6 +75,7 @@ def parse_query_param(query_param: str, searchType: str = "notice"):
             "resource_metadata.description",
             "resource_metadata.dublincore.title",
             "resource_metadata.dublincore.creator",
+            "resource_metadata.dublincore.contributor",
             "resource_metadata.dublincore.subject",
             "resource_metadata.dublincore.publisher"
         ],
@@ -334,7 +335,7 @@ def extract_highlight_patterns(query: str):
     return patterns
 
 
-def build_facet_clause(es_field: str, values: list) -> dict:
+def build_facet_clause(es_field: str, values: list, match_any: bool = False) -> dict:
     """
     ES facet clause for several values on single facet, combined with AND
 
@@ -342,9 +343,17 @@ def build_facet_clause(es_field: str, values: list) -> dict:
     it would select docs pertaining to one or the other 'creator'
     We intend to restrict to docs where authors are co-authors :
     one term per value, all mandatory.
+
+    `match_any` switches to that OR logic, for facets whose values are
+    alternatives rather than cumulative properties: a resource belongs to a
+    single collection (e.g. one annual volume), so selecting several
+    collections widens the results instead of emptying them.
     """
     if len(values) == 1:
         return {"term": {es_field: values[0]}}
+
+    if match_any:
+        return {"terms": {es_field: values}}
 
     return {
         "bool": {
@@ -564,7 +573,11 @@ def register_search_endpoint(
                             continue
 
                         es_field = get_facet_es_field(facet_field)
-                        clause = build_facet_clause(es_field, values)
+                        clause = build_facet_clause(
+                            es_field,
+                            values,
+                            match_any=facet_field == "collections"
+                        )
 
                         if facet_field == "collections":
                             collection_filters.append(clause)
@@ -773,7 +786,11 @@ def register_search_endpoint(
 
                         es_field = get_facet_es_field(facet_field)
 
-                        clause = build_facet_clause(es_field, values)
+                        clause = build_facet_clause(
+                            es_field,
+                            values,
+                            match_any=facet_field == "collections"
+                        )
 
                         if facet_field == "collections":
                             collection_filters.append(clause)
