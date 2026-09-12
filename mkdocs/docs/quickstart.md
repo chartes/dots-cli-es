@@ -2,8 +2,8 @@
 
 This page walks through a full local cycle: configure, index, inspect, search.
 
-It assumes Elasticsearch is running with the ICU plugin and that the package is installed — see
-[Installation](installation.md).
+It assumes Elasticsearch is running with the ICU plugin, and that `dots-cli-es` and its venv are
+installed — see [Installation](installation.md).
 
 ## 1. Activate the environment
 
