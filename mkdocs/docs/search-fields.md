@@ -109,8 +109,3 @@ With no other code change, this single declaration:
 For a temporal range facet, declare a second entry whose `id` ends in `:range` and which carries
 `range_start` / `range_end`, following the pattern of the existing temporal block.
 
-## Reserved accessors
-
-A block of registry helpers (`SEARCH_FIELDS_BY_ID`, `get_search_field`, `indexed_fields`,
-`facet_fields`, …) is intentionally commented out in the module, with a rationale comment. It is
-reserved for a future field-discovery command or endpoint.

@@ -104,15 +104,4 @@ from an installed wheel as well as from a checkout. It then:
     - Because the two blocks are flattened into one dictionary, a key present in both `source:` and
       `config:` would be silently resolved in favour of `config:`.
 
-## Keys that are *not* configurable
-
-Two values are read from the config dictionary but declared in none of the YAML files, so they always
-fall back to their literal defaults:
-
-| Key | Default |
-|---|---|
-| `MAX_CONCURRENT_REQUESTS` | `5` |
-| `RESOURCE_WORKERS` | `5` |
-
-Adding them to the `config:` block is enough to make them effective.
 

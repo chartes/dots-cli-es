@@ -79,9 +79,6 @@ Both responses also carry `collection_indexed` and a `duration` in seconds.
     filters=resource_metadata.dublincore.creator:Molière|Racine
     ```
 
-A further `after` parameter is read but never used — a leftover from an abandoned composite-aggregation
-pagination.
-
 ## Facets
 
 Facet aggregations are generated from the [search field registry](search-fields.md): one `terms`
