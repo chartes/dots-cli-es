@@ -2764,7 +2764,7 @@ def make_cli():
         print("\n" + "=" * 60)
         print("📊  Résumé de l’indexation")
         print("=" * 60)
-        print(f"❌  Erreurs ES (bulk)                    : ")#{ app.index_stats["bulk_es_errors"] }
+        # print(f"❌  Erreurs ES (bulk)                    : ")#{ app.index_stats["bulk_es_errors"] }
         print(f"🗂️  Durée indexation collection         : { format_duration(timer_collections_indexation) }")
         print(f"📁  Durée indexation documents          : { timer_documents_indexation }")
         print(f"📄  Durée indexation fragments          : { timer_fragments_indexation }")

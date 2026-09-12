@@ -60,6 +60,6 @@ A practical checklist:
 6. **Watch stdout** for the `⚠️ Index … mapping 'dynamic=…' differs from conf` warning: it means the
    conf was never applied to that index.
 
-!!! tip "The bulk error counter prints empty"
-    The final summary has an *"Erreurs ES (bulk)"* line whose value is commented out in the code, so
-    it always displays blank. Count the rows of `{ts}_passage_exceptions.csv` instead.
+!!! tip "Bulk errors are not in the summary"
+    The end-of-run summary does not report Elasticsearch bulk errors. Count the rows of
+    `{ts}_passage_exceptions.csv` instead — that is where per-item bulk rejections land.
