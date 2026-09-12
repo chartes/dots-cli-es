@@ -19,3 +19,6 @@ build/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+
+# MkDocs build output
+mkdocs/site/
