@@ -30,12 +30,12 @@ Crawls the DTS tree through ThunderDots and populates both indexes. See [Indexin
 
 | Option | Default | Effect |
 |---|---|---|
-| `--collections`, `-c` | none | Comma-separated collection ids to restrict the crawl. |
+| `--collections`, `-c` | none | Comma-separated collection ids to restrict the crawl. **Case-sensitive**. |
 
 ```bash
 dots-es-cli --config=local index
 ES_PASSWORD=xxx dots-es-cli --config=prod index
-dots-es-cli --config=staging index --collections=cartulaires,cid
+dots-es-cli --config=staging index --collections=theater,ENCPOS
 ```
 
 Missing indexes are created automatically from the mapping files before indexing starts.
@@ -89,8 +89,8 @@ A convenience query runner; the result is pretty-printed to stdout.
 | `-t`, `--term` | off | Switches from a `match` on `content` to a full Lucene `query_string`. |
 
 ```bash
-dots-es-cli --config=local search "cartulaire"
-dots-es-cli search -t "content:abbaye AND type.keyword:fragment" --indexes=dots_document
+dots-es-cli --config=local search "Molière"
+dots-es-cli search -t "content:tragédie AND type.keyword:fragment" --indexes=dots_document
 ```
 
 !!! note "`--term` is the *broader* mode"

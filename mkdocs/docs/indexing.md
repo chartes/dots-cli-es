@@ -35,7 +35,7 @@ dots-es-cli [--config local|staging|prod] index [--collections id1,id2]
 
 | Option | Default | Effect |
 |---|---|---|
-| `--collections` / `-c` | *none* | Comma-separated collection ids. Restricts the crawl; without it, the whole tree under `TARGET_COLLECTION` is walked. |
+| `--collections` / `-c` | *none* | Comma-separated collection ids, **case-sensitive** (`ENCPOS`, not `encpos`). Restricts the crawl; without it, the whole tree under `TARGET_COLLECTION` is walked. |
 
 ## Examples
 
@@ -47,7 +47,7 @@ dots-es-cli --config=local index
 ES_PASSWORD=your_password dots-es-cli --config=prod index
 
 # only two collections
-dots-es-cli --config=staging index --collections=cartulaires,cid
+dots-es-cli --config=staging index --collections=theater,ENCPOS
 ```
 
 ## Excluded collections

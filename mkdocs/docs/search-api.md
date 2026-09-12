@@ -76,7 +76,7 @@ Both responses also carry `collection_indexed` and a `duration` in seconds.
     makes it handy for hand-written queries and debugging.
 
     ```
-    filters=resource_metadata.dublincore.creator:Guérard|Marion
+    filters=resource_metadata.dublincore.creator:Molière|Racine
     ```
 
 A further `after` parameter is read but never used — a leftover from an abandoned composite-aggregation

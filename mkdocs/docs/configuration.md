@@ -20,9 +20,9 @@ environment variable for the API.
 | Key | Controls |
 |---|---|
 | `DTS_URL` | The DoTS/DTS endpoint. Passed to `ThunderDots(endpoint_dts=…)`, used to resolve the root collection, and used by the API to build the `dts_url` of each hit. |
-| `TARGET_COLLECTION` | Identifier of the collection to crawl. **Empty** means "start from the DTS root collection", which is resolved at runtime. |
+| `TARGET_COLLECTION` | Identifier of the collection to crawl. **Case-sensitive** — it must match the DTS identifier exactly (`ENCPOS`, not `encpos`). **Empty** means "start from the DTS root collection", which is resolved at runtime. |
 | `CUSTOM_SETTINGS_PATH` | Directory of front-end `*.conf.json` settings files. Every `excludeCollectionIds` entry found there is added to the exclusion set. Environment-interpolated. |
-| `ADDITIONAL_EXCLUDED_COLLECTIONS` | List of collection ids to skip, merged with the ones derived from `CUSTOM_SETTINGS_PATH`. Compared case-insensitively. |
+| `ADDITIONAL_EXCLUDED_COLLECTIONS` | List of collection ids to skip, merged with the ones derived from `CUSTOM_SETTINGS_PATH`. **Case-insensitive**, unlike `TARGET_COLLECTION`: both the list and the candidate identifier are lowercased before comparison, so `ENCPOS` and `encpos` are equivalent here. |
 
 ### `config:` — Elasticsearch and the API
 
@@ -49,6 +49,18 @@ environment variable for the API.
 | `ES_PASSWORD` | CLI + API | Interpolated into `ELASTICSEARCH_URL` — only meaningful for `staging` and `prod`. |
 | `CUSTOM_SETTINGS_PATH` | CLI | Directory scanned for `*.conf.json` front-end settings. If unset or not a directory, no error: the exclusion set is simply empty. |
 | `SERVER_ENV_CONFIG` | API only | Overrides the `--config` argument. Intended for server environments. |
+
+!!! warning "Identifiers are case-sensitive on the DoTS side"
+    `TARGET_COLLECTION` — like `--collections` — is sent to the endpoint verbatim, and DoTS matches
+    identifiers exactly: `ENCPOS` resolves, `encpos` does not. A wrong case produces an **empty
+    crawl, not an error**. Check the identifier against the endpoint first:
+
+    ```bash
+    curl "https://dots.chartes.psl.eu/demo/api/dts/collection?id=ENCPOS"
+    ```
+
+    The exclusion list is the exception: it is compared in lowercase on both sides, so its case does
+    not matter.
 
 Typical invocation with security enabled:
 
