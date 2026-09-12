@@ -68,6 +68,10 @@ from an installed wheel as well as from a checkout. It then:
 4. coerces `ADDITIONAL_EXCLUDED_COLLECTIONS` into a lowercase set.
 
 !!! warning "Operational caveats"
+    - **A non-editable install freezes these files.** Because they are read from the *installed*
+      package, `pip install .` means the CLI uses the copy in `site-packages`, not the one in your
+      clone. Editing `dots_es/config/local.yml` then changes nothing until you reinstall. Use
+      `pip install -e .` while you are still adjusting the configuration.
     - **An unset variable is left as literal text.** `${ES_PASSWORD}` stays `${ES_PASSWORD}` in the
       URL rather than becoming empty, which surfaces as a confusing connection error. Check that the
       variable is exported before blaming Elasticsearch.

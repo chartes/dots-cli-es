@@ -87,10 +87,18 @@ Create the virtual environment and install:
 ```bash
 python3 -m venv your_venv_name
 source your_venv_name/bin/activate
-pip install .
+pip install .   # (use dev install below to update TARGET_COLLECTION to index)
 ```
 
 This installs the `dots_es` package plus the **`dots-es-cli`** and **`dots-api`** console scripts.
+
+!!! warning "A plain install freezes the YAML configuration"
+    `pip install .` **copies** the package into `site-packages`, `config/*.yml` included — and that is
+    the copy the CLI reads. Editing `dots_es/config/local.yml` in your clone to change
+    `TARGET_COLLECTION`, the excluded collections or the DTS endpoint would then have **no effect**.
+
+    Use the editable install below if you need to adjust the configuration, or reinstall after every
+    change.
 
 For development (editable install and dev tooling):
 
