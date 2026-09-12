@@ -115,7 +115,11 @@ Nothing here affects indexing. The only settings key the CLI reads is `excludeCo
 
 ```json
 "customRoutes": [
-  { "name": "Search", "path": "search", "compName": "SearchPage" }
+  {
+    "name": "Search",
+    "path": "search",
+    "compName": "SearchPage"
+  }
 ]
 ```
 
@@ -130,12 +134,28 @@ search page — so no request ever reaches this API for it.
 ```json
 "searchConfig": {
   "facets": [
-    { "key": "dublinCore.creator", "label": "Auteurs", "enabled": true, "order": 3 },
-    { "key": "dublinCore.publisher", "enabled": false }
+    {
+      "key": "dublinCore.creator",
+      "label": "Auteurs",
+      "enabled": true,
+      "order": 3
+    },
+    {
+      "key": "dublinCore.publisher",
+      "enabled": false
+    }
   ],
   "temporalFacets": [
-    { "key": "dublinCore.created", "label": "Promotion (période)", "enabled": true, "order": 1 },
-    { "key": "dublinCore.issued", "enabled": false }
+    {
+      "key": "dublinCore.created",
+      "label": "Promotion (période)",
+      "enabled": true,
+      "order": 1
+    },
+    {
+      "key": "dublinCore.issued",
+      "enabled": false
+    }
   ]
 }
 ```
