@@ -37,10 +37,10 @@ environment variable for the API.
 
 | | `local` | `staging` | `prod` |
 |---|---|---|---|
-| `DTS_URL` | `dev.chartes.psl.eu/dots/api/dts` | same as local | `dots.chartes.psl.eu/api/dts` |
+| `DTS_URL` | `dev.chartes.psl.eu/dots/api/dts` | same as local | `dots.chartes.psl.eu/demo/api/dts/collection` |
 | `TARGET_COLLECTION` | `cartulaires` | `cartulaires` | `""` (DTS root) |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | `http://elastic:${ES_PASSWORD}@127.0.0.1:9200` | idem staging |
-| `ADDITIONAL_EXCLUDED_COLLECTIONS` | 15 ids | same list | `[]` |
+| `ADDITIONAL_EXCLUDED_COLLECTIONS` | 15 ids | `[]` | `[]` |
 
 ## Environment variables
 
@@ -87,9 +87,6 @@ fall back to their literal defaults:
 | `RESOURCE_WORKERS` | `5` |
 
 Adding them to the `config:` block is enough to make them effective.
-
-Likewise, the commented-out `project:` block at the top of each file (`name`, `output_dir`,
-`overwrite`) is **not read by any code** — it documents an intent, nothing more.
 
 !!! note "No more `.env`"
     Earlier versions used `.env` files with `python-dotenv`. They were dropped in favour of these
