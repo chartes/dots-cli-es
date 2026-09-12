@@ -40,9 +40,8 @@ environment variable for the API.
 | `DTS_URL` | `http://localhost:8080/api/dts` — DoTS installed locally, on its default port<br>or any reachable DTS endpoint, e.g. `https://dev.chartes.psl.eu/dots/api/dts` | any reachable DTS endpoint, e.g. `https://dev.chartes.psl.eu/dots/api/dts` | any reachable DTS endpoint, e.g. `https://dots.chartes.psl.eu/demo/api/dts` |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` — Elasticsearch installed locally, on its default port<br>or any reachable Elasticsearch endpoint | any reachable Elasticsearch endpoint, credentials included, e.g. `http://elastic:${ES_PASSWORD}@127.0.0.1:9200` | idem staging |
 
-Only the two endpoints differ. `TARGET_COLLECTION` is `""` in all three files — every environment
-therefore crawls from the **DTS root collection** — and `ADDITIONAL_EXCLUDED_COLLECTIONS` is empty
-everywhere, so nothing is skipped unless `CUSTOM_SETTINGS_PATH` contributes exclusions.
+Set your `TARGET_COLLECTION` and your `ADDITIONAL_EXCLUDED_COLLECTIONS` as needed for your respective
+environments.
 
 ## Environment variables
 
