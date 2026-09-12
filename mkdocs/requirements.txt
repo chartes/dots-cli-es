@@ -1,0 +1,5 @@
+# Documentation toolchain (MkDocs Material).
+# Kept separate from the application requirements so building the docs
+# never pulls the indexing/runtime dependencies.
+mkdocs>=1.6
+mkdocs-material>=9.5

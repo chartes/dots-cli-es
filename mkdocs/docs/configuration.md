@@ -1,0 +1,96 @@
+# Configuration
+
+All runtime settings live in three YAML files shipped with the package:
+
+```
+dots_es/config/
+├── local.yml
+├── staging.yml
+└── prod.yml
+```
+
+One of them is selected by the global `--config` option of the CLI
+(`--config [local|staging|prod]`, **default `staging`**), and by `--config` / the `SERVER_ENV_CONFIG`
+environment variable for the API.
+
+## Keys
+
+### `source:` — where the corpus comes from
+
+| Key | Controls |
+|---|---|
+| `DTS_URL` | The DoTS/DTS endpoint. Passed to `ThunderDots(endpoint_dts=…)`, used to resolve the root collection, and used by the API to build the `dts_url` of each hit. |
+| `TARGET_COLLECTION` | Identifier of the collection to crawl. **Empty** means "start from the DTS root collection", which is resolved at runtime. |
+| `CUSTOM_SETTINGS_PATH` | Directory of front-end `*.conf.json` settings files. Every `excludeCollectionIds` entry found there is added to the exclusion set. Environment-interpolated. |
+| `ADDITIONAL_EXCLUDED_COLLECTIONS` | List of collection ids to skip, merged with the ones derived from `CUSTOM_SETTINGS_PATH`. Compared case-insensitively. |
+
+### `config:` — Elasticsearch and the API
+
+| Key | Controls |
+|---|---|
+| `ELASTICSEARCH_URL` | ES endpoint used by both the CLI and the API. |
+| `DOCUMENT_INDEX` | Index holding resources **and** passages. Default `dots_document`. |
+| `COLLECTION_INDEX` | Index holding collections. Default `dots_collection`. |
+| `SEARCH_RESULT_PER_PAGE` | Default `page[size]` of the search API. Default `200`. |
+
+### Differences between the three files
+
+| | `local` | `staging` | `prod` |
+|---|---|---|---|
+| `DTS_URL` | `dev.chartes.psl.eu/dots/api/dts` | same as local | `dots.chartes.psl.eu/api/dts` |
+| `TARGET_COLLECTION` | `cartulaires` | `cartulaires` | `""` (DTS root) |
+| `ELASTICSEARCH_URL` | `http://localhost:9200` | `http://elastic:${ES_PASSWORD}@127.0.0.1:9200` | idem staging |
+| `ADDITIONAL_EXCLUDED_COLLECTIONS` | 15 ids | same list | `[]` |
+
+## Environment variables
+
+| Variable | Used by | Effect |
+|---|---|---|
+| `ES_PASSWORD` | CLI + API | Interpolated into `ELASTICSEARCH_URL` — only meaningful for `staging` and `prod`. |
+| `CUSTOM_SETTINGS_PATH` | CLI | Directory scanned for `*.conf.json` front-end settings. If unset or not a directory, no error: the exclusion set is simply empty. |
+| `SERVER_ENV_CONFIG` | API only | Overrides the `--config` argument. Intended for server environments. |
+
+Typical invocation with security enabled:
+
+```bash
+ES_PASSWORD=your_password dots-es-cli --config=prod index
+```
+
+## How the files are loaded
+
+`load_config(alias)` resolves `dots_es/config/{alias}.yml` through `importlib.resources`, so it works
+from an installed wheel as well as from a checkout. It then:
+
+1. replaces every `None` with an empty string;
+2. expands environment variables in **every** string value;
+3. **flattens** `source:` and `config:` into a single dictionary — `app.config["DTS_URL"]` and
+   `app.config["DOCUMENT_INDEX"]` sit side by side;
+4. coerces `ADDITIONAL_EXCLUDED_COLLECTIONS` into a lowercase set.
+
+!!! warning "Operational caveats"
+    - **An unset variable is left as literal text.** `${ES_PASSWORD}` stays `${ES_PASSWORD}` in the
+      URL rather than becoming empty, which surfaces as a confusing connection error. Check that the
+      variable is exported before blaming Elasticsearch.
+    - **The resolved configuration is printed on stdout at every run**, including the password
+      embedded in `ELASTICSEARCH_URL`. Keep that in mind for CI logs and shared terminals.
+    - Because the two blocks are flattened into one dictionary, a key present in both `source:` and
+      `config:` would be silently resolved in favour of `config:`.
+
+## Keys that are *not* configurable
+
+Two values are read from the config dictionary but declared in none of the YAML files, so they always
+fall back to their literal defaults:
+
+| Key | Default |
+|---|---|
+| `MAX_CONCURRENT_REQUESTS` | `5` |
+| `RESOURCE_WORKERS` | `5` |
+
+Adding them to the `config:` block is enough to make them effective.
+
+Likewise, the commented-out `project:` block at the top of each file (`name`, `output_dir`,
+`overwrite`) is **not read by any code** — it documents an intent, nothing more.
+
+!!! note "No more `.env`"
+    Earlier versions used `.env` files with `python-dotenv`. They were dropped in favour of these
+    YAML files; only the environment variables listed above remain.

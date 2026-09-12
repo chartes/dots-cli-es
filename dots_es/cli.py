@@ -220,7 +220,11 @@ def sanitize_dts_json(data: dict, app, collection_id: str):
     return cleaned_data
 
 def report_indexation_event(csv_path: str, row: dict, header: list):
-    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    # ensure_csv_file crée le dossier ET écrit l'en-tête si le fichier n'existe
+    # pas encore : sans cela, les rapports qui ne sont pas pré-créés au début de
+    # la commande index (passage_exceptions, metadata_dts_sanitization) étaient
+    # produits sans ligne d'en-tête.
+    ensure_csv_file(csv_path, header)
 
     with open(csv_path, mode="a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=header)
@@ -2539,11 +2543,10 @@ def make_cli():
                 raise e
 
     @click.command("index")
-    @click.option('--years', required=True, default="all", help="1987-1999")
     @click.option("--collections", "-c", default=None,
                   help="Comma separated collection ids to index, ex: coll1, coll2,coll3")
     @click.pass_obj
-    def index(cli_ctx: CLIContext, years, collections):
+    def index(cli_ctx: CLIContext, collections):
         """
             Commande principale d'indexation :
             - Purge /out
@@ -2736,6 +2739,27 @@ def make_cli():
         timer_documents_indexation = end_documents_indexation - start_documents_indexation
         timer_fragments_indexation = end_fragments_indexation - start_fragments_indexation
         timer_total_indexation = timer_collections_indexation + timer_documents_indexation + timer_fragments_indexation
+
+        # -----------------------------
+        # Reporting des durées par phase
+        # -----------------------------
+        timing_csv = get_indexation_csv_paths(app)["timing"]
+        _now = datetime.now(timezone.utc).isoformat()
+
+        for _phase_id, _duration in (
+            ("fragments_indexation", timer_fragments_indexation),
+            ("documents_indexation", timer_documents_indexation),
+            ("collections_indexation", timer_collections_indexation),
+            ("total_indexation", timer_total_indexation),
+        ):
+            report_timing(timing_csv, {
+                "timestamp": _now,
+                "level": "phase",
+                "id": _phase_id,
+                "parent_id": "total_indexation" if _phase_id != "total_indexation" else "",
+                "duration_sec": round(_duration, 3),
+                "duration_hms": format_duration(_duration),
+            })
 
         print("\n" + "=" * 60)
         print("📊  Résumé de l’indexation")

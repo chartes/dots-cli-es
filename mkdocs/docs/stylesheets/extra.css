@@ -1,0 +1,32 @@
+.md-header {
+  height: 3.3rem;
+}
+
+.md-header__inner {
+  min-height: 3.2rem;
+}
+
+.md-header__button.md-logo {
+  margin: 0;
+  padding: 0.2rem;
+  height: 3.2rem;
+  display: flex;
+  align-items: center;
+}
+
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 5rem;
+  width: 7rem;
+}
+
+.md-copyright__highlight {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.footer-logo {
+  height: 7rem !important;
+  width: auto;
+}
