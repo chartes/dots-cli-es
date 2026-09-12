@@ -31,7 +31,6 @@ Crawls the DTS tree through ThunderDots and populates both indexes. See [Indexin
 | Option | Default | Effect |
 |---|---|---|
 | `--collections`, `-c` | none | Comma-separated collection ids to restrict the crawl. |
-| `--years` | `"all"` | Accepted but **inert** — the value is never read. |
 
 ```bash
 dots-es-cli --config=local index

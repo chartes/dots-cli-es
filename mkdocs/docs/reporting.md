@@ -27,14 +27,11 @@ the CLI starts:
 | `{ts}_{COLLECTION_INDEX}_indexation_exceptions.csv` | `timestamp, collection_id, error_type, error_message, context` | DTS collection fetch errors, JSONL write failures, and Elasticsearch collection indexing failures. |
 | `{ts}_passage_exceptions.csv` | `timestamp, resource_id, passage_id, error_type, error_message, context` | JSON decode failures, bulk call failures, and **per-item Elasticsearch bulk rejections**. |
 | `{ts}_metadata_dts_sanitization.csv` | `timestamp, collection_id, json_path, error_type, value` | Empty JSON keys found while sanitising a raw DTS response. |
+| `{ts}_dots_indexation_timing.csv` | `timestamp, level, id, parent_id, duration_sec, duration_hms` | One row per indexing phase at the end of the run: `fragments_indexation`, `documents_indexation`, `collections_indexation` and their `total_indexation` parent. |
 
-!!! note "Two files are written without a header"
-    Only four files get a header pre-written. `{ts}_passage_exceptions.csv` and
-    `{ts}_metadata_dts_sanitization.csv` start directly with a data row — keep the column list above
-    at hand when opening them.
-
-A seventh file, `{ts}_dots_indexation_timing.csv`, is declared in the code but **never written**: the
-helper has no call site. Treat it as reserved.
+Every report carries its header row: the writer creates the file with its header the first time a row
+is appended, so a file is never produced headerless — even the ones that are not pre-created at the
+start of the run.
 
 ## What to check after a run
 

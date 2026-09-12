@@ -36,7 +36,6 @@ dots-es-cli [--config local|staging|prod] index [--collections id1,id2]
 | Option | Default | Effect |
 |---|---|---|
 | `--collections` / `-c` | *none* | Comma-separated collection ids. Restricts the crawl; without it, the whole tree under `TARGET_COLLECTION` is walked. |
-| `--years` | `"all"` | **Currently inert.** The option is accepted (help text suggests `1987-1999`) but its value is never read. Kept for backward compatibility. |
 
 ## Examples
 

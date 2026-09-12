@@ -64,14 +64,20 @@ Both responses also carry `collection_indexed` and a `duration` in seconds.
 | `excludeFacets` | none | Comma-separated canonical keys not to compute or return. `collections` is a valid value. |
 | `excludeTemporalFacets` | none | Same, for temporal range facets. |
 | `range[<field>]` | none | Repeated-key syntax, e.g. `range[dublinCore.created]=gte:1200,lte:1300`. |
+| `filters` | none | `field:value1\|value2,field2:value3` — one clause per comma, values within a field joined with `OR`. Each clause becomes a `query_string` restricted to that field. |
 | `page[number]` | `1` | Offset pagination. |
 | `page[size]` | `SEARCH_RESULT_PER_PAGE` (200) | **Minimum 25**, no maximum. |
 | `sort` | `dublinCore.created` ascending, then `_score` descending | Comma-separated criteria; a `-` prefix means descending. Missing values sort last. |
 
-!!! danger "`filters` is broken"
-    The `filters` parameter is still referenced by the endpoint, but its parser is commented out.
-    Passing `filters=` raises a `NameError`, which surfaces as **HTTP 400**. Use `facets` and
-    `range[…]` instead.
+!!! tip "`filters` versus `facets`"
+    Both narrow the result set, but they are not interchangeable. `facets` takes a JSON object keyed
+    by **canonical** metadata keys and is what the front-end sends when a user ticks a facet value;
+    `filters` is a compact string form resolved directly against **Elasticsearch field names**, which
+    makes it handy for hand-written queries and debugging.
+
+    ```
+    filters=resource_metadata.dublincore.creator:Guérard|Marion
+    ```
 
 A further `after` parameter is read but never used — a leftover from an abandoned composite-aggregation
 pagination.

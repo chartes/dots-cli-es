@@ -64,11 +64,11 @@ Fragments with neither `content` nor `head` are skipped and logged to `{ts}_…_
 count usually points at a mismatch between the DTS navigation and the TEI structure — the fragments
 exist in navigation but carry no indexable text.
 
-## `HTTP 400` from the search API when using `filters`
+## `HTTP 400` from the search API
 
-The `filters` query parameter is broken: its parser is commented out, so the endpoint raises a
-`NameError` that is returned as a 400. Use `facets` and `range[…]` instead. See
-[Search API](search-api.md).
+Every uncaught exception in the endpoint is returned as an **HTTP 400 with the exception text as the
+body** — so read the response body, it names the failing parameter. Malformed `facets` JSON and
+malformed `range[…]` clauses are the usual causes.
 
 ## The API returns resources instead of highlighted fragments
 
