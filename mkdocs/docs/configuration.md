@@ -37,7 +37,7 @@ environment variable for the API.
 
 | | `local` | `staging` | `prod` |
 |---|---|---|---|
-| `DTS_URL` | `http://localhost:8080/api/dts` — DoTS installed locally, on its default port<br>or any reachable DTS endpoint, e.g. `https://dev.chartes.psl.eu/dots/api/dts` | `https://dev.chartes.psl.eu/dots/api/dts` | `https://dots.chartes.psl.eu/demo/api/dts/collection` |
+| `DTS_URL` | `http://localhost:8080/api/dts` — DoTS installed locally, on its default port<br>or any reachable DTS endpoint, e.g. `https://dev.chartes.psl.eu/dots/api/dts` | any reachable DTS endpoint, e.g. `https://dev.chartes.psl.eu/dots/api/dts` | any reachable DTS endpoint, e.g. `https://dots.chartes.psl.eu/demo/api/dts` |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | `http://elastic:${ES_PASSWORD}@127.0.0.1:9200` | idem staging |
 
 Only the two endpoints differ. `TARGET_COLLECTION` is `""` in all three files — every environment
@@ -51,6 +51,17 @@ everywhere, so nothing is skipped unless `CUSTOM_SETTINGS_PATH` contributes excl
 | `ES_PASSWORD` | CLI + API | Interpolated into `ELASTICSEARCH_URL` — only meaningful for `staging` and `prod`. |
 | `CUSTOM_SETTINGS_PATH` | CLI | Directory scanned for `*.conf.json` front-end settings. If unset or not a directory, no error: the exclusion set is simply empty. |
 | `SERVER_ENV_CONFIG` | API only | Overrides the `--config` argument. Intended for server environments. |
+
+!!! danger "No trailing slash in `DTS_URL`"
+    The code appends the route itself — `{DTS_URL}/collection`, `{DTS_URL}/document`. A trailing
+    slash therefore produces a doubled separator, which the endpoint rejects outright:
+
+    ```
+    …/api/dts/collection?id=theater     → 200
+    …/api/dts//collection?id=theater    → 400   (no redirect to fall back on)
+    ```
+
+    Write `https://dots.chartes.psl.eu/demo/api/dts`, never `…/api/dts/`.
 
 !!! warning "Identifiers are case-sensitive on the DoTS side"
     `TARGET_COLLECTION` — like `--collections` — is sent to the endpoint verbatim, and DoTS matches
