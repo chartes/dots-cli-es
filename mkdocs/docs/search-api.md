@@ -61,13 +61,18 @@ Both responses also carry `collection_indexed` and a `duration` in seconds.
 | `collectionId` | none | Scopes the search to a collection subtree; also drives `collection_indexed` in the response. |
 | `collections` | none | `[a,b]` list of collection keys to **remove** from the returned collection facets. |
 | `facets` | none | JSON object `{canonical_key: [values]}` of selected facet values. `collections` uses OR logic; every other facet uses AND. |
-| `excludeFacets` | none | Comma-separated canonical keys not to compute or return. `collections` is a valid value. |
-| `excludeTemporalFacets` | none | Same, for temporal range facets. |
+| `excludeFacets` <sup>*</sup> | none | Comma-separated canonical keys not to compute or return. `collections` is a valid value. |
+| `excludeTemporalFacets` <sup>*</sup> | none | Same, for temporal range facets. |
 | `range[<field>]` | none | Repeated-key syntax, e.g. `range[dublinCore.created]=gte:1200,lte:1300`. |
 | `filters` | none | `field:value1\|value2,field2:value3` — one clause per comma, values within a field joined with `OR`. Each clause becomes a `query_string` restricted to that field. |
 | `page[number]` | `1` | Offset pagination. |
 | `page[size]` | `SEARCH_RESULT_PER_PAGE` (200) | **Minimum 25**, no maximum. |
 | `sort` | `dublinCore.created` ascending, then `_score` descending | Comma-separated criteria; a `-` prefix means descending. Missing values sort last. |
+
+<sup>*</sup> These two parameters exist mainly for the
+[dots-vue](https://github.com/dots-suite/dots-vue) front-end and the per-collection settings it
+reads. You rarely build them by hand: see [Collection settings](#collection-settings) below, and the
+example repository [dots-vue-demo-settings](https://github.com/dots-suite/dots-vue-demo-settings).
 
 !!! tip "`filters` versus `facets`"
     Both narrow the result set, but they are not interchangeable. `facets` takes a JSON object keyed
@@ -93,4 +98,80 @@ Buckets are computed under the field `id` and republished to clients under the c
 - Temporal fields sort on their `temporal.{range_start}` bound.
 - Text, keyword and URL fields sort on the `.sort` sub-field produced by the `sortable` normalizer —
   never on `.keyword`. That normalizer strips leading punctuation, lowercases and folds accents, which
-  is what makes `« Cartulaire »` sort next to `Cartulaire`.
+  is what makes `« Tragédie »` sort next to `Tragédie`.
+
+## Collection settings
+
+Most callers of this API are not humans: they are instances of the
+[dots-vue](https://github.com/dots-suite/dots-vue) front-end, which builds its requests from a JSON
+settings file **per collection**. Those files live in a settings repository — for example
+[dots-vue-demo-settings](https://github.com/dots-suite/dots-vue-demo-settings) — and two of their keys
+concern search directly.
+
+Nothing here affects indexing. The only settings key the CLI reads is `excludeCollectionIds`; see
+[Indexing](indexing.md#excluded-collections).
+
+### `customRoutes` — whether the collection has a search page at all
+
+```json
+"customRoutes": [
+  { "name": "Search", "path": "search", "compName": "SearchPage" }
+]
+```
+
+This is pure routing: it decides that `/<collectionId>/search` exists and which component answers
+there. Without this entry the URL redirects to the collection home, and the collection simply has no
+search page — so no request ever reaches this API for it.
+
+`compName` is resolved through a whitelist in the front-end that currently contains only
+`SearchPage`; any other value renders a "page not found". The route comparison is **case-sensitive**.
+
+### `searchConfig` — which facets are offered
+
+```json
+"searchConfig": {
+  "facets": [
+    { "key": "dublinCore.creator", "label": "Auteurs", "enabled": true, "order": 3 },
+    { "key": "dublinCore.publisher", "enabled": false }
+  ],
+  "temporalFacets": [
+    { "key": "dublinCore.created", "label": "Promotion (période)", "enabled": true, "order": 1 },
+    { "key": "dublinCore.issued", "enabled": false }
+  ]
+}
+```
+
+| Field | Effect |
+|---|---|
+| `key` | A **canonical metadata key** — the same vocabulary this API publishes (`dublinCore.creator`, `extensions.author`), plus the special value `collections`. |
+| `enabled: false` | The key is collected and sent as **`excludeFacets`** (or **`excludeTemporalFacets`** for the temporal array). The facet is neither aggregated by Elasticsearch nor displayed. |
+| `label` | Front-end only: overrides the displayed name. |
+| `order` | Front-end only: display order. |
+
+!!! important "The logic is exclusion-based, not inclusion-based"
+    A facet **absent** from the configuration is still aggregated and still displayed. Listing a facet
+    with `enabled: true` documents an intent but changes nothing by itself; only `enabled: false`
+    has an effect. A partial configuration therefore never hides the facets it forgets to mention.
+
+### What the front-end actually sends
+
+Taking the `ENCPOS` settings as an example — `collections` and `dublinCore.creator` enabled, the rest
+disabled — the first request of the search page is:
+
+```
+GET /api/1.0/search
+  ?query=&page[number]=1&page[size]=25
+  &collectionId=ENCPOS
+  &excludeFacets=dublinCore.contributor,dublinCore.publisher,dublinCore.language,extensions.author,…
+  &excludeTemporalFacets=dublinCore.issued,extensions.dateCreated,…
+```
+
+The excluded keys appear in the order of the arrays in the file. Because `collections` is not
+excluded here, the collections aggregation is built and rendered — under the label the settings give
+it.
+
+!!! warning "Arrays are replaced, not merged"
+    A collection's settings are merged over the project-wide ones, but **arrays are replaced
+    wholesale**. A collection that redefines `facets` supersedes the root `facets` entirely, while
+    still inheriting the root `temporalFacets` if it does not redefine them. Copy the whole array
+    when you override one.
