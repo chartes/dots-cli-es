@@ -155,6 +155,41 @@ curl http://elastic:<b><i>ELASTIC_PASSWORD</i></b>@localhost:9200/_cat/indices?v
 
 - [Front-end's Readme](https://github.com/chartes/dots-vue)
 
+## Documentation
+
+The documentation site (MkDocs Material) lives in [`mkdocs/`](./mkdocs/) and is published to GitHub
+Pages by [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) on every push to `dev`.
+
+Everyday commands:
+
+```bash
+make docs.install    # install the toolchain (once)
+make docs.serve      # live-reload server on http://127.0.0.1:8000
+make docs.build      # build in strict mode — exactly what the CI runs
+make docs.clean      # remove the generated site
+make help            # list every target
+```
+
+`make docs.build` runs `mkdocs build --strict`, which **fails** on any broken internal link or any
+page missing from the nav. Run it before pushing.
+
+### Documentation dependencies
+
+The documentation toolchain is deliberately kept **separate from the application dependencies**:
+building the site must not require Elasticsearch, lxml or thunderdots. It is therefore not declared
+as an extra in `pyproject.toml`, but in its own files.
+
+As everywhere else in this project, the pinned file is **generated, not edited by hand**. Edit
+`mkdocs/requirements.in` to add or change a dependency, then recompile:
+
+```bash
+make docs.lock
+# equivalent to:
+pip-compile mkdocs/requirements.in -o mkdocs/requirements.txt
+```
+
+`pip-compile` comes from the `dev` extra (`pip install -e . -r requirements-dev.txt`).
+
 ---
 
 Additional details for offline commands:
