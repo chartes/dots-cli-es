@@ -114,10 +114,10 @@ pip list
 ### Initial indexing (and reindexing without configuration changes):
 
 <pre><code>
-(ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) dots-es-cli (--config=<b><i>local/staging/prod</i></b>) index (--years <b><i>"YYYY-YYYY"</i></b>)
+(ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) dots-es-cli (--config=<b><i>local/staging/prod</i></b>) index (--collections=<b><i>theater,ENCPOS</i></b>)
 </code></pre>
 
-When the index doesn't exist it is created according to the project ES [configuration files](./elasticsearch/).
+When the index doesn't exist it is created according to the project ES [configuration files](./dots_es/elasticsearch/).
 
 ### Updating index configuration
 
@@ -127,7 +127,7 @@ This operation will delete the pre-existing index.
 (ES_PASSWORD=<b><i>ELASTIC_PASSWORD</i></b>) dots-es-cli (--config=<b><i>local/staging/prod</i></b>) update-conf --rebuild --indexes=<b><i>dots_document/dots_collection</i></b>
 </code></pre>
 
-The above command updates the indexes according to the project ES [configuration files](./elasticsearch/).
+The above command updates the indexes according to the project ES [configuration files](./dots_es/elasticsearch/).
 
 ### Check created indexes:
 
