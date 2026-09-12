@@ -1,8 +1,8 @@
 # DoTS Search API
 
 **DoTS Search API** (package `dots_es`, repository `dots-cli-es`) indexes TEI resources published through a
-[DoTS](https://github.com/dots-suite/dots) endpoint into [Elasticsearch](https://www.elastic.co/), and exposes
-a search API on top of that index.
+[DoTS](https://github.com/dots-suite/dots) endpoint into [Elasticsearch](https://www.elastic.co/), via
+[ThunderDots](https://github.com/dots-suite/ThunderDots), and exposes a search API on top of the ES index.
 
 It ships two console scripts:
 
