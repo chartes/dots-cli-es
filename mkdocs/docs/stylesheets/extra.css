@@ -16,9 +16,11 @@
 
 .md-header__button.md-logo img,
 .md-header__button.md-logo svg {
-  /* largeur fixe, hauteur libre : préserve le rapport d'aspect du logo */
-  width: 7rem;
-  height: auto;
+  /* hauteur fixe, largeur libre : préserve le rapport d'aspect du logo.
+     2.4rem = 48 px (Material pose html{font-size:125%}, donc 1rem = 20px),
+     soit la taille du logo sur dots_documentation : 84 x 48 px. */
+  height: 2.4rem;
+  width: auto;
 }
 
 .md-copyright__highlight {
