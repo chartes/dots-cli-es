@@ -3,7 +3,7 @@
 # -------------------------------------------------------------------
 source:
   DTS_URL: "https://dev.chartes.psl.eu/dots/api/dts"
-  TARGET_COLLECTION: "cartulaires"  # Identifiant de la collection racine à explorer empty by default
+  TARGET_COLLECTION: ""  # Identifiant de la collection racine à explorer empty by default
   CUSTOM_SETTINGS_PATH: !!str ${CUSTOM_SETTINGS_PATH}
   ADDITIONAL_EXCLUDED_COLLECTIONS: []
 

@@ -38,9 +38,11 @@ environment variable for the API.
 | | `local` | `staging` | `prod` |
 |---|---|---|---|
 | `DTS_URL` | `dev.chartes.psl.eu/dots/api/dts` | same as local | `dots.chartes.psl.eu/demo/api/dts/collection` |
-| `TARGET_COLLECTION` | `cartulaires` | `cartulaires` | `""` (DTS root) |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | `http://elastic:${ES_PASSWORD}@127.0.0.1:9200` | idem staging |
-| `ADDITIONAL_EXCLUDED_COLLECTIONS` | 15 ids | `[]` | `[]` |
+
+Only the two endpoints differ. `TARGET_COLLECTION` is `""` in all three files — every environment
+therefore crawls from the **DTS root collection** — and `ADDITIONAL_EXCLUDED_COLLECTIONS` is empty
+everywhere, so nothing is skipped unless `CUSTOM_SETTINGS_PATH` contributes exclusions.
 
 ## Environment variables
 
