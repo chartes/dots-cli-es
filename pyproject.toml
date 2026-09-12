@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dots-es"
-version = "0.1.0"
+dynamic = ["version"]
 description = "DoTS Elasticsearch search API and indexing CLI"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -36,6 +36,9 @@ dots-api = "dots_es.flask_app:main"
 
 [tool.setuptools]
 packages = ["dots_es", "dots_es.api"]
+
+[tool.setuptools.dynamic]
+version = { attr = "dots_es.__version__" }
 
 [tool.setuptools.package-data]
 dots_es = ["config/*.yml", "elasticsearch/*.json"]
