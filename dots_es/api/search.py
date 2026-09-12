@@ -702,8 +702,35 @@ def register_search_endpoint(
 
                 scope_filter = {"term": {"resource_metadata.path_ids.keyword": collection_id}}
 
+                # Old unified config kept for reference:
+                # "sentence" scanner starts at sentence start, often
+                # leaving <mark> at the edge (median: 4 chars before
+                # <mark> vs 20 with fvh).
+
+                # highlight_config = {
+                #     "type": "unified",
+                #     "require_field_match": True,
+                #     "pre_tags": ["<mark>"],
+                #     "post_tags": ["</mark>"],
+                #     "fields": {
+                #         "content": {
+                #             "fragment_size": 80,
+                #             "number_of_fragments": 100,
+                #             "boundary_scanner": "sentence",
+                #             "no_match_size": 50
+                #         }
+                #     }
+                # }
+
+                # fvh: more balanced context around the term.
+                # Requires "with_positions_offsets" term_vector on
+                # content (set in dots_document.conf.json).
+                # fragment_offset: context before the highlighted term (fvh only).
+                # No boundary_scanner: with fvh, it can stretch fragments
+                # far beyond fragment_size.
+
                 highlight_config = {
-                    "type": "unified",
+                    "type": "fvh",
                     "require_field_match": True,
                     "pre_tags": ["<mark>"],
                     "post_tags": ["</mark>"],
@@ -711,7 +738,7 @@ def register_search_endpoint(
                         "content": {
                             "fragment_size": 80,
                             "number_of_fragments": 100,
-                            "boundary_scanner": "sentence",
+                            "fragment_offset": 25,
                             "no_match_size": 50
                         }
                     }
@@ -907,15 +934,18 @@ def register_search_endpoint(
                         f for f in collection_facets if f["facet_key"] not in collection_facet
                     ]
 
-                def add_ellipsis(fragment):
-                    if not fragment:
-                        return fragment
-                    text = fragment.strip()
-                    if text and text[0].islower():
-                        text = "..." + text
-                    if not text.endswith((".", "…", "!", "?")):
-                        text = text + "..."
-                    return text
+                # No longer used: fragment separator is now added in the front end
+                # (ResourcesList.vue). Kept just in case.
+
+                # def add_ellipsis(fragment):
+                #     if not fragment:
+                #         return fragment
+                #     text = fragment.strip()
+                #     if text and text[0].islower():
+                #         text = "..." + text
+                #     if not text.endswith((".", "…", "!", "?")):
+                #         text = text + "..."
+                #     return text
 
                 grouped_results = []
 
@@ -950,7 +980,8 @@ def register_search_endpoint(
                                 "citeType": h["_source"].get("citeType"),
                                 "highlight": {
                                     "content": [
-                                        add_ellipsis(frag)
+                                        # add_ellipsis(frag) - no longer in use, see above
+                                        frag
                                         for frag in (h.get("highlight", {}).get("content") or [])
                                     ]
                                 }
