@@ -16,8 +16,9 @@
 
 .md-header__button.md-logo img,
 .md-header__button.md-logo svg {
-  height: 5rem;
+  /* largeur fixe, hauteur libre : préserve le rapport d'aspect du logo */
   width: 7rem;
+  height: auto;
 }
 
 .md-copyright__highlight {
