@@ -158,8 +158,8 @@ curl http://elastic:<b><i>ELASTIC_PASSWORD</i></b>@localhost:9200/_cat/indices?v
 ## Documentation
 
 The documentation site (MkDocs Material) lives in [`mkdocs/`](./mkdocs/) and is published to GitHub
-Pages by [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) on every push to `master` or
-`dev`.
+Pages by [`.github/workflows/docs.yml`](./.github/workflows/docs.yml) on every push to `dev`. Pushes
+to `master` build the site as a check, without publishing it.
 
 Everyday commands:
 
