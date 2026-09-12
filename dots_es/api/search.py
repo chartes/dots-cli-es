@@ -153,82 +153,36 @@ def parse_query_param(query_param: str, searchType: str = "notice"):
         }
     ]
 
-# def parse_filters_param(filters_param: str):
-#     """
-#     Parse un paramètre filters de type:
-#     field1:val1|val2,field2:val3
-#
-#     Retourne une liste de filtres ES (term / terms)
-#     """
-#     es_filters = []
-#
-#     if not filters_param:
-#         return es_filters
-#
-#     for part in filters_param.split(","):
-#         if ":" not in part:
-#             continue
-#
-#         field, raw_values = part.split(":", 1)
-#         field = field.strip()
-#         values = [v.strip() for v in raw_values.split("|") if v.strip()]
-#
-#         if not values:
-#             continue
-#
-#         # cast simple (int si possible)
-#         casted_values = []
-#         for v in values:
-#             if v.isdigit():
-#                 casted_values.append(int(v))
-#             else:
-#                 casted_values.append(v)
-#
-#         # champ numérique → pas de .keyword
-#         is_numeric = all(isinstance(v, int) for v in casted_values)
-#         es_field = field if is_numeric else f"{field}.keyword"
-#
-#         if len(casted_values) == 1:
-#             es_filters.append({
-#                 "term": { es_field: casted_values[0] }
-#             })
-#         else:
-#             es_filters.append({
-#                 "terms": { es_field: casted_values }
-#             })
-#
-#     return es_filters
+def parse_filters_param(filters_param: str):
+    es_filters = []
 
-# def parse_filters_param(filters_param: str):
-#     es_filters = []
-#
-#     if not filters_param:
-#         return es_filters
-#
-#     for part in filters_param.split(","):
-#         if ":" not in part:
-#             continue
-#
-#         field, raw_values = part.split(":", 1)
-#         field = field.strip()
-#
-#         values = [v.strip() for v in raw_values.split("|") if v.strip()]
-#         if not values:
-#             continue
-#
-#         # on reconstruit une query string OR
-#         query = " OR ".join(values)
-#
-#         es_filters.append({
-#             "query_string": {
-#                 "query": query,
-#                 "fields": [field],
-#                 "default_operator": "AND",
-#                 "analyze_wildcard": True
-#             }
-#         })
-#
-#     return es_filters
+    if not filters_param:
+        return es_filters
+
+    for part in filters_param.split(","):
+        if ":" not in part:
+            continue
+
+        field, raw_values = part.split(":", 1)
+        field = field.strip()
+
+        values = [v.strip() for v in raw_values.split("|") if v.strip()]
+        if not values:
+            continue
+
+        # on reconstruit une query string OR
+        query = " OR ".join(values)
+
+        es_filters.append({
+            "query_string": {
+                "query": query,
+                "fields": [field],
+                "default_operator": "AND",
+                "analyze_wildcard": True
+            }
+        })
+
+    return es_filters
 
 def parse_range_parameter():
     _range = None
