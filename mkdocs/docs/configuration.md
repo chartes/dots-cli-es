@@ -116,6 +116,3 @@ fall back to their literal defaults:
 
 Adding them to the `config:` block is enough to make them effective.
 
-!!! note "No more `.env`"
-    Earlier versions used `.env` files with `python-dotenv`. They were dropped in favour of these
-    YAML files; only the environment variables listed above remain.
