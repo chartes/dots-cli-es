@@ -37,7 +37,7 @@ environment variable for the API.
 
 | | `local` | `staging` | `prod` |
 |---|---|---|---|
-| `DTS_URL` | `dev.chartes.psl.eu/dots/api/dts` | same as local | `dots.chartes.psl.eu/demo/api/dts/collection` |
+| `DTS_URL` | `http://localhost:8080/api/dts` — DoTS installed locally, on its default port<br>or any reachable DTS endpoint, e.g. `https://dev.chartes.psl.eu/dots/api/dts` | `https://dev.chartes.psl.eu/dots/api/dts` | `https://dots.chartes.psl.eu/demo/api/dts/collection` |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | `http://elastic:${ES_PASSWORD}@127.0.0.1:9200` | idem staging |
 
 Only the two endpoints differ. `TARGET_COLLECTION` is `""` in all three files — every environment
