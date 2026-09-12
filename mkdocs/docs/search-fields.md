@@ -57,11 +57,15 @@ schema.org, DoTS extensions, and finally temporal range facets generated from Th
 Temporal metadata goes through `build_filtered_temporal_metadata()`, which keeps only the
 `_start`/`_end` bounds of declared range facets and discards raw and `*_iso` values.
 
-!!! warning "`DOTS` family fields are filtered out in practice"
-    `dots:shortTitle` and `dots:resourceIIIFManifest` are declared with `index=True`, but the
-    extension whitelist only collects fields whose family is `SCHEMA`. As a result these two are not
-    whitelisted by `extract_metadata`. Whether this is a bug or intentional could not be determined
-    from the code alone.
+!!! note "`DOTS` fields are declared but deliberately not indexed"
+    The extension whitelist collects only fields whose family is `SCHEMA`, so the two `DOTS`
+    extensions — `dots:shortTitle` and `dots:resourceIIIFManifest` — never reach the index, even
+    though they carry the default `index=True`.
+
+    **This is a deliberate choice for the time being**: these two fields are not meant to be indexed
+    yet. Adding `SearchFieldFamily.DOTS` to the whitelist in `extract_metadata` is all it would take
+    to start writing them into every resource document — so do not treat the current behaviour as a
+    bug to be fixed.
 
 ## What the registry does at query time
 
