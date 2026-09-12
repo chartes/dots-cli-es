@@ -9,7 +9,8 @@ description = "DoTS Elasticsearch search API and indexing CLI"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [{ name = "École nationale des chartes" }]
+authors = [{ name = "Jean-Victor Boby" }]
+maintainers = [{ name = "École nationale des chartes" }]
 dependencies = [
     "click",
     "elasticsearch>=8,<9",

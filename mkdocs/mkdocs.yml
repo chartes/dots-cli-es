@@ -84,4 +84,4 @@ extra:
 extra_css:
   - stylesheets/extra.css
 
-copyright: Copyright &copy; 2026 DoTS Search API
+copyright: Copyright &copy; 2026 Jean-Victor Boby — <a href="https://github.com/dots-suite/dots-cli-es/blob/master/LICENSE.md">MIT License</a>

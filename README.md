@@ -6,6 +6,8 @@ Elasticsearch API to search the [DoTS collections & resources](https://dev.chart
 
 ![Static Badge](https://img.shields.io/badge/Flask-3.1.0-blue?logo=flask)
 ![Static Badge](https://img.shields.io/badge/elasticsearch-8.12-blue?logo=elasticsearch)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE.md)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://dots-suite.github.io/dots-cli-es/)
 
 ## Prerequisite - Install Elasticsearch
 
@@ -212,3 +214,27 @@ Commands:
   update-conf  Update the index configuration and mappings
 
 ```
+
+---
+
+## License
+
+dots-cli-es is distributed under the [MIT License](./LICENSE.md).
+
+## Citation
+
+If you use dots-cli-es in academic work, please cite it as:
+
+```
+@software{boby_dots_cli_es_2026,
+  author       = {Boby, Jean-Victor},
+  title        = {dots-cli-es},
+  year         = {2026},
+  publisher    = {GitHub},
+  institution  = {{École nationale des chartes}},
+  url          = {https://github.com/dots-suite/dots-cli-es},
+  note         = {Elasticsearch indexing CLI and search API for TEI resources published with DoTS}
+}
+```
+
+You can also use the repository metadata from [CITATION.cff](./CITATION.cff).

@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+title: "dots-cli-es"
+abstract: >
+  Elasticsearch indexing CLI and search API for TEI resources published through a
+  DoTS (Distributed Text Services) endpoint. dots-cli-es crawls a DTS collection
+  tree with ThunderDots, builds Elasticsearch documents for collections, resources
+  and TEI fragments from a declarative registry of search fields, reports on every
+  indexing run, and exposes a faceted full-text search API consumed by the dots-vue
+  front-end.
+type: software
+authors:
+  - family-names: Boby
+    given-names: Jean-Victor
+    affiliation: "École nationale des chartes – PSL"
+repository-code: "https://github.com/dots-suite/dots-cli-es"
+url: "https://dots-suite.github.io/dots-cli-es/"
+license: MIT
+keywords:
+  - DTS
+  - Distributed Text Services
+  - DoTS
+  - TEI
+  - XML
+  - Elasticsearch
+  - full-text search
+  - faceted search
+  - digital humanities
+  - cultural heritage
+  - Python
+version: "0.1.0"
+date-released: "2026-09-13"
+preferred-citation:
+  type: software
+  title: "dots-cli-es"
+  authors:
+    - family-names: Boby
+      given-names: Jean-Victor
+      affiliation: "École nationale des chartes – PSL"
+  repository-code: "https://github.com/dots-suite/dots-cli-es"
+  url: "https://dots-suite.github.io/dots-cli-es/"
+  license: MIT
+  version: "0.1.0"
+  date-released: "2026-09-13"
