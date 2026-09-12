@@ -11,7 +11,7 @@ source:
 # Configuration du moteur de recherche ES
 # -------------------------------------------------------------------
 config:
-  ELASTICSEARCH_URL: "http://elastic:${ES_PASSWORD}@127.0.0.1:9200"
+  ELASTICSEARCH_URL: "http://127.0.0.1:9200"
   DOCUMENT_INDEX: "dots_document"
   COLLECTION_INDEX: "dots_collection"
   SEARCH_RESULT_PER_PAGE: 200

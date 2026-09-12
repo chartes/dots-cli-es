@@ -38,7 +38,7 @@ environment variable for the API.
 | | `local` | `staging` | `prod` |
 |---|---|---|---|
 | `DTS_URL` | `http://localhost:8080/api/dts` — DoTS installed locally, on its default port<br>or any reachable DTS endpoint, e.g. `https://dev.chartes.psl.eu/dots/api/dts` | any reachable DTS endpoint, e.g. `https://dev.chartes.psl.eu/dots/api/dts` | any reachable DTS endpoint, e.g. `https://dots.chartes.psl.eu/demo/api/dts` |
-| `ELASTICSEARCH_URL` | `http://localhost:9200` — Elasticsearch installed locally, on its default port<br>or any reachable Elasticsearch endpoint | any reachable Elasticsearch endpoint, credentials included, e.g. `http://elastic:${ES_PASSWORD}@127.0.0.1:9200` | idem staging |
+| `ELASTICSEARCH_URL` | `http://localhost:9200` — Elasticsearch installed locally, on its default port<br>or any reachable Elasticsearch endpoint | any reachable Elasticsearch endpoint, e.g. `http://127.0.0.1:9200` | idem staging |
 
 Set your `TARGET_COLLECTION` and your `ADDITIONAL_EXCLUDED_COLLECTIONS` as needed for your respective
 environments.
@@ -47,7 +47,7 @@ environments.
 
 | Variable | Used by | Effect |
 |---|---|---|
-| `ES_PASSWORD` | CLI + API | Interpolated into `ELASTICSEARCH_URL` — only meaningful for `staging` and `prod`. |
+| `ES_PASSWORD` | CLI + API | Password used to authenticate against Elasticsearch. Read directly by the clients, **never written into `ELASTICSEARCH_URL`**. Required whenever the node has security enabled. Set `ES_USER` too if the account is not `elastic`. |
 | `CUSTOM_SETTINGS_PATH` | CLI | Directory scanned for `*.conf.json` front-end settings. If unset or not a directory, no error: the exclusion set is simply empty. |
 | `SERVER_ENV_CONFIG` | API only | Overrides the `--config` argument. Intended for server environments. |
 
@@ -99,8 +99,6 @@ from an installed wheel as well as from a checkout. It then:
     - **An unset variable is left as literal text.** `${ES_PASSWORD}` stays `${ES_PASSWORD}` in the
       URL rather than becoming empty, which surfaces as a confusing connection error. Check that the
       variable is exported before blaming Elasticsearch.
-    - **The resolved configuration is printed on stdout at every run**, including the password
-      embedded in `ELASTICSEARCH_URL`. Keep that in mind for CI logs and shared terminals.
     - Because the two blocks are flattened into one dictionary, a key present in both `source:` and
       `config:` would be silently resolved in favour of `config:`.
 

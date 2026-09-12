@@ -23,15 +23,16 @@ it **deletes the index**:
 dots-es-cli --config=local update-conf --rebuild --indexes=dots_document
 ```
 
-## Connection errors mentioning `${ES_PASSWORD}`
+## Elasticsearch rejects the connection (401)
 
-Environment variables are expanded in the YAML values, but an **unset** variable is left as literal
-text rather than blanked. The client then tries to connect to a host whose password is the seven
-characters `${ES_PASSWORD}`. Export the variable before running:
+The node has security enabled and `ES_PASSWORD` is unset or wrong. Credentials are read from the
+environment, never from `ELASTICSEARCH_URL`:
 
 ```bash
 ES_PASSWORD=your_password dots-es-cli --config=prod index
 ```
+
+Set `ES_USER` as well if the account is not `elastic`.
 
 ## "conf not found" during `update-conf`
 
@@ -75,8 +76,3 @@ malformed `range[…]` clauses are the usual causes.
 You passed `no-highlight`. The switch tests for *presence*, so even `no-highlight=false` enables
 notice mode. Remove the parameter entirely.
 
-## The configuration — including the password — is printed at every run
-
-That is current behaviour: the flattened configuration is echoed to stdout on startup, and
-`ELASTICSEARCH_URL` embeds the password in `staging` and `prod`. Take it into account for CI logs and
-shared terminals.

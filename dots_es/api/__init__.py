@@ -1,6 +1,6 @@
 from elasticsearch import Elasticsearch
 from flask import Flask, Blueprint
-from dots_es.config_loader import load_config
+from dots_es.config_loader import load_config, es_basic_auth
 
 api_bp = Blueprint('api_bp', __name__)
 
@@ -32,7 +32,10 @@ def create_app(config_name: str):
     app.config.update(config_dict)
 
     # Initialize Elasticsearch client if URL is present
-    app.elasticsearch = Elasticsearch([app.config['ELASTICSEARCH_URL']]) if app.config.get('ELASTICSEARCH_URL') else None
+    app.elasticsearch = Elasticsearch(
+        [app.config['ELASTICSEARCH_URL']],
+        basic_auth=es_basic_auth()
+    ) if app.config.get('ELASTICSEARCH_URL') else None
 
     with app.app_context():
         # Import and register search endpoint

@@ -44,6 +44,21 @@ def resolve_env_vars(d: Any) -> Any:
         return d
 
 
+def es_basic_auth():
+    """Return the Elasticsearch credentials, read from the environment.
+
+    Credentials are deliberately kept out of ELASTICSEARCH_URL: as long as they
+    are not part of the URL, no print, traceback or CI log can expose them.
+
+    :return: (user, password) or None when ES_PASSWORD is not set
+    :rtype: tuple | None
+    """
+    password = os.environ.get("ES_PASSWORD")
+    if not password:
+        return None
+    return os.environ.get("ES_USER", "elastic"), password
+
+
 def load_config(alias: str) -> dict:
     """Load a YAML configuration file, replace None with empty strings, resolve environment variables,
     and flatten 'source' + 'config' sections for compatibility with App.
@@ -76,5 +91,4 @@ def load_config(alias: str) -> dict:
     flat_config["ADDITIONAL_EXCLUDED_COLLECTIONS"] = set(
         c.lower() for c in flat_config.get("ADDITIONAL_EXCLUDED_COLLECTIONS", [])
     )
-    print('config', flat_config)
     return flat_config

@@ -14,7 +14,7 @@ import asyncio
 from elasticsearch import Elasticsearch
 from lxml import etree
 
-from dots_es.config_loader import load_config
+from dots_es.config_loader import load_config, es_basic_auth
 
 from dots_es.api.search_fields import SEARCH_FIELDS, SearchField, get_value, SearchFieldFamily, build_filtered_temporal_metadata
 
@@ -33,7 +33,8 @@ class App:
         self.config = config_dict
         # Initialize Elasticsearch client if URL is provided
         self.elasticsearch = Elasticsearch(
-            [self.config["ELASTICSEARCH_URL"]]
+            [self.config["ELASTICSEARCH_URL"]],
+            basic_auth=es_basic_auth()
         ) if self.config.get("ELASTICSEARCH_URL") else None
 
         # Combined indexes string for ES
@@ -487,7 +488,7 @@ def load_elastic_conf(app, index_name, rebuild=False):
     try:
         if rebuild:
             print(f"Deleting {index_name} index.")
-            with httpx.Client() as client:
+            with httpx.Client(auth=es_basic_auth()) as client:
                 res = client.delete(url)
         with resources.files("dots_es").joinpath("elasticsearch", "_global.conf.json").open('r') as _global:
             global_settings = json.load(_global)
@@ -495,8 +496,8 @@ def load_elastic_conf(app, index_name, rebuild=False):
             with resources.files("dots_es").joinpath("elasticsearch", f"{index_name}.conf.json").open('r') as f:
                 payload = json.load(f)
                 payload["settings"] = global_settings
-                print("UPDATE INDEX CONFIGURATION:", url)
-                with httpx.Client() as client:
+                print("UPDATE INDEX CONFIGURATION:", index_name)
+                with httpx.Client(auth=es_basic_auth()) as client:
                     res = client.put(url, json=payload)
                     if not str(res.status_code).startswith("20"):
                         try:
@@ -2536,7 +2537,7 @@ def make_cli():
             res = None
             try:
                 print(f"Deleting {name} index.")
-                with httpx.Client() as client:
+                with httpx.Client(auth=es_basic_auth()) as client:
                     res = client.delete(url)
             except Exception as e:
                 print(res.text, str(e), flush=True, end=" ")
