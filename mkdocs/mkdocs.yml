@@ -72,6 +72,7 @@ nav:
   - Indexing: indexing.md
   - Indexing reports: reporting.md
   - Search API: search-api.md
+  - Using custom settings: custom-settings.md
   - CLI reference: cli-reference.md
   - Troubleshooting: troubleshooting.md
 
