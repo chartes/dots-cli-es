@@ -123,8 +123,7 @@ This is pure routing: it decides that `/<collectionId>/search` exists and which 
 there. Without this entry the URL redirects to the collection home, and the collection simply has no
 search page — so no request ever reaches this API for it.
 
-`compName` is resolved through a whitelist in the front-end that currently contains only
-`SearchPage`; any other value renders a "page not found". The route comparison is **case-sensitive**.
+`SearchPage` is case-sensitive.
 
 ### `searchConfig` — which facets are offered
 
