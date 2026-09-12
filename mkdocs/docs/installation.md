@@ -19,16 +19,6 @@ package repositories, archive or container:
 
 → [**Install Elasticsearch 8.12**](https://www.elastic.co/guide/en/elasticsearch/reference/8.12/install-elasticsearch.html) (official documentation)
 
-The quickest way to get a disposable local node is Docker, security disabled:
-
-```bash
-docker run --name dots-es -d -p 9200:9200 \
-  -e "discovery.type=single-node" \
-  -e "xpack.security.enabled=false" \
-  -e "xpack.security.http.ssl.enabled=false" \
-  elasticsearch:8.12.1
-```
-
 Check that the node answers:
 
 ```bash
@@ -59,7 +49,7 @@ plugin is mandatory** — without it, index creation fails.
 
 === "Docker"
 
-    On the container started above:
+    On a containerised node — replace `dots-es` with your container name:
 
     ```bash
     docker exec dots-es bash -c "bin/elasticsearch-plugin install analysis-icu"
