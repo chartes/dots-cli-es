@@ -15,9 +15,9 @@ and query aliases at search time.
 | `type` | — | One of `KEYWORD`, `TEXT`, `TEMPORAL`, `URL`, `INTEGER`. Drives `.keyword` suffixing, aggregation eligibility and sort strategy. |
 | `index` | `True` | The field is kept in `resource_metadata` by the indexer. |
 | `facet` | `False` | Build a `terms` aggregation for this field. |
-| `autocomplete` | `False` | Declarative only — see the note below. |
-| `fulltext` | `False` | Only `content` carries it. |
-| `multiple` | `False` | Declarative only. |
+| `autocomplete` | `False` | Not operational yet — see the note below. |
+| `fulltext` | `False` | Only `content` declares it. Not operational yet. |
+| `multiple` | `False` | Not operational yet. |
 | `range_start` / `range_end` | `None` | ES paths of the numeric bounds of a temporal range facet. |
 
 Two derived properties matter:
@@ -27,10 +27,9 @@ Two derived properties matter:
   key, not under `id`.
 - **`is_range_facet`** — true when `facet` is set together with `range_start` and `range_end`.
 
-!!! note "Flags without a consumer"
-    `autocomplete`, `fulltext` and `multiple` are declared but **no code in this repository reads
-    them**. They are either consumed by the front-end or reserved for future use — do not expect
-    setting them to change behaviour here.
+!!! note "Flags that are not operational yet"
+    `autocomplete`, `fulltext` and `multiple` can be declared on a field, but they are **not
+    operational at the moment**: setting them changes neither indexing nor querying.
 
 ## Families
 
@@ -88,7 +87,6 @@ SearchField(
     SearchFieldFamily.DCT,
     SearchFieldType.KEYWORD,
     facet=True,
-    multiple=True,
 ),
 ```
 
