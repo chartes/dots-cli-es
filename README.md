@@ -31,7 +31,7 @@ Elasticsearch API to search the [DoTS collections & resources](https://dev.chart
 <pre>
 <code>
   cd <b><i>path/to/projects_folder/</i></b>
-  git clone https://github.com/chartes/dots-cli-es.git
+  git clone https://github.com/dots-suite/dots-cli-es.git
 </code>
 </pre>
 - Ensure you are running Python 3.12, for example with pyenv:
@@ -153,7 +153,7 @@ curl http://elastic:<b><i>ELASTIC_PASSWORD</i></b>@localhost:9200/_cat/indices?v
 
 ## Launch the front-end:
 
-- [Front-end's Readme](https://github.com/chartes/dots-vue)
+- [Front-end's Readme](https://github.com/dots-suite/dots-vue)
 
 ## Documentation
 
