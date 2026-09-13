@@ -28,7 +28,7 @@ keywords:
   - digital humanities
   - cultural heritage
   - Python
-version: "0.9.1"
+version: "0.9.2"
 date-released: "2026-09-13"
 preferred-citation:
   type: software
@@ -40,5 +40,5 @@ preferred-citation:
   repository-code: "https://github.com/dots-suite/dots-cli-es"
   url: "https://dots-suite.github.io/dots-cli-es/"
   license: MIT
-  version: "0.9.1"
+  version: "0.9.2"
   date-released: "2026-09-13"
