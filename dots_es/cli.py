@@ -1229,6 +1229,64 @@ def build_collection_facets(collection_metadata):
     ]
 
 
+def collect_resource_collection_scopes(out_dir: str) -> dict:
+    """
+    Union, per resource, of the collections it belongs to: a DTS resource may
+    have several parents, and the crawl writes one JSONL line per branch.
+    """
+    scopes = {}
+
+    for name in sorted(os.listdir(out_dir)):
+        if not name.endswith("_documents.jsonl"):
+            continue
+
+        with open(os.path.join(out_dir, name), "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    doc = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                resource_id = doc.get("resource_id")
+                if not resource_id:
+                    continue
+
+                scope = scopes.setdefault(
+                    resource_id,
+                    {"collections": [], "collection_facets": []}
+                )
+
+                known = {
+                    coll.get("collection_id")
+                    for coll in scope["collections"]
+                }
+                for coll in doc.get("collections") or []:
+                    if coll.get("collection_id") not in known:
+                        scope["collections"].append(coll)
+                        known.add(coll.get("collection_id"))
+
+                for facet in doc.get("collection_facets") or []:
+                    if facet not in scope["collection_facets"]:
+                        scope["collection_facets"].append(facet)
+
+    return scopes
+
+
+def apply_collection_scope(doc: dict, scopes: dict) -> dict:
+    """
+    Replace the single-branch collections of a document by their union.
+    Passages inherit the scope of their resource, so one table serves both.
+    """
+    scope = scopes.get(doc.get("resource_id"))
+    if not scope:
+        return doc
+
+    doc["collections"] = scope["collections"]
+    doc["collection_facets"] = scope["collection_facets"]
+
+    return doc
+
+
 async def index_resource_passages_async(
     app,
     resource_id: str,
@@ -2622,6 +2680,18 @@ def make_cli():
         # Lister tous les fichiers JSONL dans /out
         all_files = [f for f in os.listdir(out_dir) if f.endswith(".jsonl")]
 
+        # Union the collections of every resource before indexing: otherwise
+        # the last branch written overwrites the branches seen before it.
+        collection_scopes = collect_resource_collection_scopes(out_dir)
+        multi_parent = sum(
+            1 for scope in collection_scopes.values()
+            if len(scope["collections"]) > 1
+        )
+        print(
+            f"Portée des collections : {len(collection_scopes)} ressources, "
+            f"dont {multi_parent} rattachées à plusieurs collections"
+        )
+
         # -----------------------------
         # 1 Indexer les passages
         # -----------------------------
@@ -2635,8 +2705,8 @@ def make_cli():
                 for line in f:
                     try:
                         doc = json.loads(line)
+                        apply_collection_scope(doc, collection_scopes)
 
-                        # TODO: Previous mono-collection process to remove once multi-collection approach validated
                         bulk_actions.append({"index": {"_index": app.config["DOCUMENT_INDEX"],
                                                        "_id": f'{doc["resource_id"]}::{doc["passage_id"]}'}})
                         bulk_actions.append(doc)
@@ -2696,17 +2766,26 @@ def make_cli():
         start_documents_indexation = time.perf_counter()
 
         document_files = [f for f in all_files if f.endswith("_documents.jsonl")]
+        # A multi-parent resource appears in several files: index it once,
+        # carrying the union of its collections.
+        indexed_resources = set()
         for document_file in document_files:
             path = os.path.join(out_dir, document_file)
             with open(path, "r", encoding="utf-8") as f:
                 for line in f:
                     try:
                         doc = json.loads(line)
+
+                        if doc.get("resource_id") in indexed_resources:
+                            continue
+
+                        apply_collection_scope(doc, collection_scopes)
                         app.elasticsearch.index(
                             index=app.config["DOCUMENT_INDEX"],
                             id=doc["resource_metadata"]["id"],
                             body=doc
                         )
+                        indexed_resources.add(doc.get("resource_id"))
                         app.index_stats["resources_indexed"] = app.index_stats.get("resources_indexed", 0) + 1
                     except Exception as e:
                         report_resource_indexation_errors(app, resource_id=doc.get("resource_id", "*"), error=e)
