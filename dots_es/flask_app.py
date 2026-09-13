@@ -35,15 +35,33 @@ if server_env_config_env_var:
 # Otherwise, check if .yml file to use is provided in command line (with '--config=' option)
 else:
     env_alias = args.config
-if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-    print("selected_yml_file :", env_alias)
-
 
 ###############################################
 # Launching app with the selected environment #
 ###############################################
 
 flask_app = create_app(config_name=env_alias)
+
+
+def log_startup_config():
+    """
+    Name the configuration and the indices served. A wrong --config answers
+    normally, with another corpus: the mistake is otherwise invisible.
+    """
+    print(
+        f"dots-api configuration : {env_alias}.yml\n"
+        f"  Elasticsearch : {flask_app.config.get('ELASTICSEARCH_URL')}\n"
+        f"  documents     : {flask_app.config.get('DOCUMENT_INDEX')}\n"
+        f"  collections   : {flask_app.config.get('COLLECTION_INDEX')}",
+        flush=True
+    )
+
+
+# Under the development server the module is imported twice; only the reloaded
+# process serves. Under a WSGI server there is no reloader, and the alias comes
+# from SERVER_ENV_CONFIG.
+if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or server_env_config_env_var:
+    log_startup_config()
 
 
 def main():
