@@ -20,6 +20,9 @@ from dots_es.api.search_fields import (
     resolve_sort_field
 )
 
+# Hard ceiling on page[size], whatever the client asks or the configuration says.
+MAX_PAGE_SIZE = 200
+
 def build_collection_facet(scope_collection_id):
     return {
         "filter": {
@@ -436,8 +439,9 @@ def register_search_endpoint(
         no_highlight = isinstance(request.args.get("no-highlight", False), str)
 
         # Pagination
-        num_page = int(request.args.get('page[number]', 1))
-        page_size = max(int(request.args.get('page[size]', current_app.config["SEARCH_RESULT_PER_PAGE"])), 25)
+        default_page_size = current_app.config["SEARCH_RESULT_PER_PAGE"]
+        num_page = max(int(request.args.get('page[number]', 1)), 1)
+        page_size = min(max(int(request.args.get('page[size]', default_page_size)), 1), MAX_PAGE_SIZE)
 
         # Tri
 
